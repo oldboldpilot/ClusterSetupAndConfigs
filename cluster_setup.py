@@ -11,6 +11,7 @@ import argparse
 import subprocess
 import sys
 import os
+import shutil
 import socket
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -61,8 +62,7 @@ class ClusterSetup:
         print("\n=== Installing Homebrew ===")
         
         # Check if brew is already installed
-        brew_check = self.run_command("which brew", check=False)
-        if brew_check.returncode == 0:
+        if shutil.which("brew") or os.path.exists("/home/linuxbrew/.linuxbrew/bin/brew"):
             print("Homebrew already installed")
             return
         
@@ -148,10 +148,7 @@ class ClusterSetup:
         
         # Configure SSH to not require strict host key checking (for cluster setup)
         ssh_config = ssh_dir / "config"
-        config_content = """Host *
-    StrictHostKeyChecking no
-    UserKnownHostsFile=/dev/null
-"""
+        config_content = """Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile=/dev/null\n"""
         with open(ssh_config, 'w') as f:
             f.write(config_content)
         ssh_config.chmod(0o600)
@@ -260,10 +257,7 @@ class ClusterSetup:
         self.run_command("sudo cp /tmp/slurm.conf /etc/slurm/slurm.conf")
         
         # Generate cgroup.conf
-        cgroup_conf = """CgroupAutomount=yes
-ConstrainCores=yes
-ConstrainRAMSpace=yes
-"""
+        cgroup_conf = """CgroupAutomount=yes\nConstrainCores=yes\nConstrainRAMSpace=yes\n"""
         with open('/tmp/cgroup.conf', 'w') as f:
             f.write(cgroup_conf)
         
@@ -294,53 +288,17 @@ ConstrainRAMSpace=yes
             cpus = "4"
             memory = "8000"
         
-        conf = f"""# slurm.conf - Slurm configuration file
-ClusterName=cluster
-SlurmctldHost=master({self.master_ip})
-
-# Scheduling
-SchedulerType=sched/backfill
-SelectType=select/cons_tres
-SelectTypeParameters=CR_Core
-
-# Logging
-SlurmctldDebug=info
-SlurmctldLogFile=/var/log/slurm/slurmctld.log
-SlurmdDebug=info
-SlurmdLogFile=/var/log/slurm/slurmd.log
-
-# State preservation
-StateSaveLocation=/var/spool/slurm/ctld
-SlurmdSpoolDir=/var/spool/slurm/d
-
-# Process tracking
-ProctrackType=proctrack/linuxproc
-TaskPlugin=task/affinity,task/cgroup
-
-# MPI
-MpiDefault=pmix
-
-# Timeouts
-SlurmctldTimeout=300
-SlurmdTimeout=300
-InactiveLimit=0
-MinJobAge=300
-KillWait=30
-Waittime=0
-
-# Nodes
-"""
-        
+        conf = f"""# slurm.conf - Slurm configuration file\nClusterName=cluster\nSlurmctldHost=master({self.master_ip})\n\n# Scheduling\nSchedulerType=sched/backfill\nSelectType=select/cons_tres\nSelectTypeParameters=CR_Core\n\n# Logging\nSlurmctldDebug=info\nSlurmctldLogFile=/var/log/slurm/slurmctld.log\nSlurmdDebug=info\nSlurmdLogFile=/var/log/slurm/slurmd.log\n\n# State preservation\nStateSaveLocation=/var/spool/slurm/ctld\nSlurmdSpoolDir=/var/spool/slurm/d\n\n# Process tracking\nProctrackType=proctrack/linuxproc\nTaskPlugin=task/affinity,task/cgroup\n\n# MPI\nMpiDefault=pmix\n\n# Timeouts\nSlurmctldTimeout=300\nSlurmdTimeout=300\nInactiveLimit=0\nMinJobAge=300\nKillWait=30\nWaittime=0\n\n# Nodes\n"""\n        
         # Add master node
-        conf += f"NodeName=master CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
+        conf += f"NodeName=master CPUs={{cpus}} RealMemory={{memory}} State=UNKNOWN\n"
         
         # Add worker nodes
         for idx, worker_ip in enumerate(self.worker_ips, start=1):
-            conf += f"NodeName=worker{idx} CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
+            conf += f"NodeName=worker{{idx}} CPUs={{cpus}} RealMemory={{memory}} State=UNKNOWN\n"
         
         # Add partition
-        all_nodes = "master," + ",".join([f"worker{i+1}" for i in range(len(self.worker_ips))])
-        conf += f"\n# Partitions\nPartitionName=all Nodes={all_nodes} Default=YES MaxTime=INFINITE State=UP\n"
+        all_nodes = "master," + ",".join([f"worker{{i+1}}" for i in range(len(self.worker_ips))])
+        conf += f"\n# Partitions\nPartitionName=all Nodes={{all_nodes}} Default=YES MaxTime=INFINITE State=UP\n"
         
         return conf
     
@@ -360,14 +318,11 @@ Waittime=0
         with open(hostfile_path, 'w') as f:
             f.write(hostfile_content)
         
-        print(f"OpenMPI hostfile created at {hostfile_path}")
-        print(f"Content:\n{hostfile_content}")
+        print(f"OpenMPI hostfile created at {{hostfile_path}}")
+        print(f"Content:\n{{hostfile_content}}")
         
         # Create default MCA parameters file
-        mca_params = """# OpenMPI MCA parameters
-btl = ^openib
-btl_tcp_if_include = eth0
-"""
+        mca_params = """# OpenMPI MCA parameters\nbtl = ^openib\nbtl_tcp_if_include = eth0\n"""
         mca_file = Path.home() / ".openmpi" / "mca-params.conf"
         with open(mca_file, 'w') as f:
             f.write(mca_params)
@@ -389,9 +344,9 @@ btl_tcp_if_include = eth0
         for name, command in checks:
             result = self.run_command(command, check=False)
             if result.returncode == 0:
-                print(f"✓ {name}: OK")
+                print(f"✓ {{name}}: OK")
             else:
-                print(f"✗ {name}: NOT FOUND or ERROR")
+                print(f"✗ {{name}}: NOT FOUND or ERROR")
         
         print("\nVerification completed")
     
@@ -400,9 +355,9 @@ btl_tcp_if_include = eth0
         print("=" * 60)
         print("CLUSTER SETUP SCRIPT")
         print("=" * 60)
-        print(f"Master Node: {self.master_ip}")
-        print(f"Worker Nodes: {', '.join(self.worker_ips)}")
-        print(f"Current node is: {'MASTER' if self.is_master else 'WORKER'}")
+        print(f"Master Node: {{self.master_ip}}")
+        print(f"Worker Nodes: {{', '.join(self.worker_ips)}}")
+        print(f"Current node is: {{'MASTER' if self.is_master else 'WORKER'}}")
         print("=" * 60)
         
         # Check sudo access
@@ -438,7 +393,7 @@ btl_tcp_if_include = eth0
             print("=" * 60)
             
         except Exception as e:
-            print(f"\n\nERROR during setup: {e}")
+            print(f"\n\nERROR during setup: {{e}}")
             import traceback
             traceback.print_exc()
             sys.exit(1)
@@ -474,12 +429,12 @@ def main() -> None:
         return len(parts) == 4 and all(part.isdigit() and 0 <= int(part) <= 255 for part in parts)
     
     if not is_valid_ip(args.master):
-        print(f"Error: Invalid master IP address: {args.master}")
+        print(f"Error: Invalid master IP address: {{args.master}}")
         sys.exit(1)
     
     for worker_ip in args.workers:
         if not is_valid_ip(worker_ip):
-            print(f"Error: Invalid worker IP address: {worker_ip}")
+            print(f"Error: Invalid worker IP address: {{worker_ip}}")
             sys.exit(1)
     
     # Create and run setup
