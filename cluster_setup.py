@@ -5,21 +5,29 @@ Supports Ubuntu Linux and WSL with Ubuntu
 
 Usage:
     python cluster_setup.py --master <master_ip> --workers <worker_ip1> <worker_ip2> ...
+    python cluster_setup.py --config config.yml
 """
 
 import argparse
 import subprocess
 import sys
 import os
+import shutil
 import socket
 from pathlib import Path
 from typing import List, Dict, Optional
+
+# YAML parsing
+try:
+    import yaml
+except Exception:
+    yaml = None
 
 
 class ClusterSetup:
     """Main class for cluster setup and configuration"""
     
-    def __init__(self, master_ip: str, worker_ips: List[str], username: str = None):
+    def __init__(self, master_ip: str, worker_ips: List[str], username: Optional[str] = None):
         self.master_ip = master_ip
         self.worker_ips = worker_ips
         self.all_ips = [master_ip] + worker_ips
@@ -62,9 +70,8 @@ class ClusterSetup:
         """Install Homebrew on Ubuntu/WSL"""
         print("\n=== Installing Homebrew ===")
         
-        # Check if brew is already installed
-        brew_check = self.run_command("which brew", check=False)
-        if brew_check.returncode == 0:
+        # Check if brew is already installed (use shutil.which for robustness)
+        if shutil.which("brew") or os.path.exists("/home/linuxbrew/.linuxbrew/bin/brew"):
             print("Homebrew already installed")
             return
         
@@ -91,7 +98,7 @@ class ClusterSetup:
             shell_profile = Path.home() / ".bashrc"
             with open(shell_profile, 'a') as f:
                 f.write('\n# Homebrew\n')
-                f.write('eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"\n')
+                f.write('eval "$({homebrew_path}/brew shellenv)"\n')
         
         print("Homebrew installed successfully")
     
@@ -150,10 +157,7 @@ class ClusterSetup:
         
         # Configure SSH to not require strict host key checking (for cluster setup)
         ssh_config = ssh_dir / "config"
-        config_content = """Host *
-    StrictHostKeyChecking no
-    UserKnownHostsFile=/dev/null
-"""
+        config_content = """Host *\n    StrictHostKeyChecking no\n    UserKnownHostsFile=/dev/null\n"""
         with open(ssh_config, 'w') as f:
             f.write(config_content)
         ssh_config.chmod(0o600)
@@ -262,10 +266,7 @@ class ClusterSetup:
         self.run_command("sudo cp /tmp/slurm.conf /etc/slurm/slurm.conf")
         
         # Generate cgroup.conf
-        cgroup_conf = """CgroupAutomount=yes
-ConstrainCores=yes
-ConstrainRAMSpace=yes
-"""
+        cgroup_conf = """CgroupAutomount=yes\nConstrainCores=yes\nConstrainRAMSpace=yes\n"""
         with open('/tmp/cgroup.conf', 'w') as f:
             f.write(cgroup_conf)
         
@@ -296,53 +297,17 @@ ConstrainRAMSpace=yes
             cpus = "4"
             memory = "8000"
         
-        conf = f"""# slurm.conf - Slurm configuration file
-ClusterName=cluster
-SlurmctldHost=master({self.master_ip})
-
-# Scheduling
-SchedulerType=sched/backfill
-SelectType=select/cons_tres
-SelectTypeParameters=CR_Core
-
-# Logging
-SlurmctldDebug=info
-SlurmctldLogFile=/var/log/slurm/slurmctld.log
-SlurmdDebug=info
-SlurmdLogFile=/var/log/slurm/slurmd.log
-
-# State preservation
-StateSaveLocation=/var/spool/slurm/ctld
-SlurmdSpoolDir=/var/spool/slurm/d
-
-# Process tracking
-ProctrackType=proctrack/linuxproc
-TaskPlugin=task/affinity,task/cgroup
-
-# MPI
-MpiDefault=pmix
-
-# Timeouts
-SlurmctldTimeout=300
-SlurmdTimeout=300
-InactiveLimit=0
-MinJobAge=300
-KillWait=30
-Waittime=0
-
-# Nodes
-"""
-        
+        conf = f"""# slurm.conf - Slurm configuration file\nClusterName=cluster\nSlurmctldHost=master({self.master_ip})\n\n# Scheduling\nSchedulerType=sched/backfill\nSelectType=select/cons_tres\nSelectTypeParameters=CR_Core\n\n# Logging\nSlurmctldDebug=info\nSlurmctldLogFile=/var/log/slurm/slurmctld.log\nSlurmdDebug=info\nSlurmdLogFile=/var/log/slurm/slurmd.log\n\n# State preservation\nStateSaveLocation=/var/spool/slurm/ctld\nSlurmdSpoolDir=/var/spool/slurm/d\n\n# Process tracking\nProctrackType=proctrack/linuxproc\nTaskPlugin=task/affinity,task/cgroup\n\n# MPI\nMpiDefault=pmix\n\n# Timeouts\nSlurmctldTimeout=300\nSlurmdTimeout=300\nInactiveLimit=0\nMinJobAge=300\nKillWait=30\nWaittime=0\n\n# Nodes\n"""
         # Add master node
-        conf += f"NodeName=master CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
+        conf += f"NodeName=master CPUs={{cpus}} RealMemory={{memory}} State=UNKNOWN\n"
         
         # Add worker nodes
         for idx, worker_ip in enumerate(self.worker_ips, start=1):
-            conf += f"NodeName=worker{idx} CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
+            conf += f"NodeName=worker{{idx}} CPUs={{cpus}} RealMemory={{memory}} State=UNKNOWN\n"
         
         # Add partition
-        all_nodes = "master," + ",".join([f"worker{i+1}" for i in range(len(self.worker_ips))])
-        conf += f"\n# Partitions\nPartitionName=all Nodes={all_nodes} Default=YES MaxTime=INFINITE State=UP\n"
+        all_nodes = "master," + ",".join([f"worker{{i+1}}" for i in range(len(self.worker_ips))])
+        conf += f"\n# Partitions\nPartitionName=all Nodes={{all_nodes}} Default=YES MaxTime=INFINITE State=UP\n"
         
         return conf
     
@@ -366,10 +331,7 @@ Waittime=0
         print(f"Content:\n{hostfile_content}")
         
         # Create default MCA parameters file
-        mca_params = """# OpenMPI MCA parameters
-btl = ^openib
-btl_tcp_if_include = eth0
-"""
+        mca_params = """# OpenMPI MCA parameters\nbtl = ^openib\nbtl_tcp_if_include = eth0\n"""
         mca_file = Path.home() / ".openmpi" / "mca-params.conf"
         with open(mca_file, 'w') as f:
             f.write(mca_params)
@@ -391,9 +353,9 @@ btl_tcp_if_include = eth0
         for name, command in checks:
             result = self.run_command(command, check=False)
             if result.returncode == 0:
-                print(f"✓ {name}: OK")
+                print(f"✓ {{name}}: OK")
             else:
-                print(f"✗ {name}: NOT FOUND or ERROR")
+                print(f"✗ {{name}}: NOT FOUND or ERROR")
         
         print("\nVerification completed")
     
@@ -402,9 +364,9 @@ btl_tcp_if_include = eth0
         print("=" * 60)
         print("CLUSTER SETUP SCRIPT")
         print("=" * 60)
-        print(f"Master Node: {self.master_ip}")
-        print(f"Worker Nodes: {', '.join(self.worker_ips)}")
-        print(f"Current node is: {'MASTER' if self.is_master else 'WORKER'}")
+        print(f"Master Node: {{self.master_ip}}")
+        print(f"Worker Nodes: {{', '.join(self.worker_ips)}}")
+        print(f"Current node is: {{'MASTER' if self.is_master else 'WORKER'}}")
         print("=" * 60)
         
         # Check sudo access
@@ -440,10 +402,19 @@ btl_tcp_if_include = eth0
             print("=" * 60)
             
         except Exception as e:
-            print(f"\n\nERROR during setup: {e}")
+            print(f"\n\nERROR during setup: {{e}}")
             import traceback
             traceback.print_exc()
             sys.exit(1)
+
+
+def load_yaml_config(path: str) -> Dict:
+    """Load YAML config file and return a dict"""
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to load YAML configs. Install with: pip install pyyaml")
+    with open(path, 'r') as f:
+        data = yaml.safe_load(f) or {}
+    return data
 
 
 def main():
@@ -452,15 +423,18 @@ def main():
         description="Cluster Setup Script for Slurm and OpenMPI on Ubuntu/WSL"
     )
     parser.add_argument(
+        '--config', '-c',
+        help='Path to YAML config file containing master/workers/username',
+        default=None
+    )
+    parser.add_argument(
         '--master',
-        required=True,
-        help='IPv4 address of the master node'
+        help='IPv4 address of the master node (overrides config file)'
     )
     parser.add_argument(
         '--workers',
         nargs='+',
-        required=True,
-        help='IPv4 addresses of worker nodes (space-separated)'
+        help='IPv4 addresses of worker nodes (space-separated; overrides config file)'
     )
     parser.add_argument(
         '--username',
@@ -470,34 +444,53 @@ def main():
     
     args = parser.parse_args()
     
+    config = {}
+    if args.config:
+        try:
+            config = load_yaml_config(args.config)
+        except Exception as e:
+            print(f"Error loading config file {{args.config}}: {{e}}")
+            sys.exit(1)
+    
+    # Merge CLI args over YAML config (CLI overrides YAML)
+    master = args.master or config.get('master')
+    workers = args.workers or config.get('workers')
+    username = args.username or config.get('username')
+    
+    # Normalize workers if provided as string in YAML
+    if isinstance(workers, str):
+        workers = workers.split()
+    
+    # Validate presence
+    if not master or not workers:
+        print("Error: master and workers must be provided either via CLI or --config YAML file.")
+        parser.print_help()
+        sys.exit(1)
+    
     # Validate IP addresses
     def is_valid_ip(ip):
         # Allow localhost and 127.0.0.1
         if ip in ['localhost', '127.0.0.1']:
             return True
-        
-        # Validate IPv4 address format
-        parts = ip.split('.')
+        parts = ip.split('.');
         if len(parts) != 4:
-            return False
-        
+            return False;
         try:
-            # All parts must be non-empty, digits only, and in range 0-255
             return all(part and part.isdigit() and 0 <= int(part) <= 255 for part in parts)
         except (ValueError, AttributeError):
             return False
     
-    if not is_valid_ip(args.master):
-        print(f"Error: Invalid master IP address: {args.master}")
+    if not is_valid_ip(master):
+        print(f"Error: Invalid master IP address: {{master}}")
         sys.exit(1)
     
-    for worker_ip in args.workers:
+    for worker_ip in workers:
         if not is_valid_ip(worker_ip):
-            print(f"Error: Invalid worker IP address: {worker_ip}")
+            print(f"Error: Invalid worker IP address: {{worker_ip}}")
             sys.exit(1)
     
     # Create and run setup
-    setup = ClusterSetup(args.master, args.workers, args.username)
+    setup = ClusterSetup(master, workers, username)
     setup.run_full_setup()
 
 
