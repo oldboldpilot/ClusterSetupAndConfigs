@@ -81,6 +81,42 @@ python cluster_setup.py --master 192.168.1.10 --workers 192.168.1.11 192.168.1.1
 python cluster_setup.py --help
 ```
 
+### YAML Configuration File (config.yml)
+
+The script also supports loading cluster configuration from a YAML file. Use `--config` (or `-c`) to provide the file. CLI flags (`--master`, `--workers`, `--username`) override values in the YAML.
+
+Example `config.yml`:
+
+```yaml
+master: 192.168.1.10
+workers:
+  - 192.168.1.11
+  - 192.168.1.12
+# Optional
+username: myuser
+```
+
+Usage with YAML:
+
+```bash
+# Use a YAML config file
+python cluster_setup.py --config config.yml
+
+# Override YAML values with CLI flags
+python cluster_setup.py --config config.yml --master 192.168.1.100
+```
+
+Notes:
+
+- The script uses PyYAML to parse YAML config files. Install it with:
+
+```bash
+pip install pyyaml
+```
+
+- If PyYAML is not installed and you run with `--config`, the script will print a helpful error asking you to install PyYAML.
+- CLI flags take precedence over YAML values.
+
 ## What the Script Does
 
 The cluster setup script performs the following operations:
@@ -108,25 +144,25 @@ The cluster setup script performs the following operations:
 After running the script on all nodes:
 
 1. **Verify SSH connectivity**:
-   ```bash
-   ssh worker1  # Should connect without password
-   ```
+```bash
+ssh worker1  # Should connect without password
+```
 
 2. **Check Slurm status**:
-   ```bash
-   sinfo          # View node status
-   scontrol show nodes  # Detailed node information
-   ```
+```bash
+sinfo          # View node status
+scontrol show nodes  # Detailed node information
+```
 
 3. **Test MPI**:
-   ```bash
-   mpirun -np 4 -hostfile ~/.openmpi/hostfile hostname
-   ```
+```bash
+mpirun -np 4 -hostfile ~/.openmpi/hostfile hostname
+```
 
 4. **Submit a test Slurm job**:
-   ```bash
-   srun -N 2 hostname
-   ```
+```bash
+srun -N 2 hostname
+```
 
 ## Configuration Files
 
