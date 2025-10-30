@@ -472,8 +472,20 @@ def main():
     
     # Validate IP addresses
     def is_valid_ip(ip):
+        # Allow localhost and 127.0.0.1
+        if ip in ['localhost', '127.0.0.1']:
+            return True
+        
+        # Validate IPv4 address format
         parts = ip.split('.')
-        return len(parts) == 4 and all(part.isdigit() and 0 <= int(part) <= 255 for part in parts)
+        if len(parts) != 4:
+            return False
+        
+        try:
+            # All parts must be non-empty, digits only, and in range 0-255
+            return all(part and part.isdigit() and 0 <= int(part) <= 255 for part in parts)
+        except (ValueError, AttributeError):
+            return False
     
     if not is_valid_ip(args.master):
         print(f"Error: Invalid master IP address: {args.master}")
