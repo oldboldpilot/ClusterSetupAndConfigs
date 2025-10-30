@@ -226,7 +226,7 @@ def run_command(
     command: str, 
     check: bool = True, 
     shell: bool = True
-) -> Union[subprocess.CompletedProcess, subprocess.CalledProcessError]
+) -> subprocess.CompletedProcess
 ```
 
 Execute a shell command and return the result.
@@ -237,10 +237,12 @@ Execute a shell command and return the result.
 - `shell` (bool): Whether to run command through shell (default: True)
 
 **Returns:**
-- `Union[subprocess.CompletedProcess, subprocess.CalledProcessError]`: Command execution result
+- `subprocess.CompletedProcess`: Command execution result object
 
 **Raises:**
 - `CalledProcessError`: If command fails and check=True
+
+**Note:** When check=False, the method always returns a CompletedProcess even on command failure (with non-zero returncode).
 
 ##### check_sudo_access
 ```python
@@ -480,7 +482,7 @@ mypy cluster_setup.py --pretty --show-error-codes
 
 The module uses the following type annotations:
 ```python
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional
 ```
 
 All code follows PEP 484 type hinting conventions and passes strict type checking without errors.

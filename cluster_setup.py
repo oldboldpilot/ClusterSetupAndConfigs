@@ -13,7 +13,7 @@ import sys
 import os
 import socket
 from pathlib import Path
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional
 
 
 class ClusterSetup:
@@ -35,7 +35,7 @@ class ClusterSetup:
         except Exception:
             return False
     
-    def run_command(self, command: str, check: bool = True, shell: bool = True) -> Union[subprocess.CompletedProcess, subprocess.CalledProcessError]:
+    def run_command(self, command: str, check: bool = True, shell: bool = True) -> subprocess.CompletedProcess:
         """Run a shell command and return the result"""
         try:
             result = subprocess.run(
@@ -49,9 +49,7 @@ class ClusterSetup:
         except subprocess.CalledProcessError as e:
             print(f"Error executing command: {command}")
             print(f"Error output: {e.stderr}")
-            if check:
-                raise
-            return e
+            raise
     
     def check_sudo_access(self) -> bool:
         """Check if user has sudo access"""
