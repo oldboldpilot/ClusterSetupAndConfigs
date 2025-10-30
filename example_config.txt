@@ -1,0 +1,16 @@
+# Example Cluster Configuration
+# 
+# This file shows example IP addresses for a 3-node cluster
+# Replace these with your actual node IP addresses
+
+# Master node IP
+MASTER_IP=192.168.1.10
+
+# Worker node IPs (space-separated)
+WORKER_IPS="192.168.1.11 192.168.1.12"
+
+# Example command to run the setup script:
+# python cluster_setup.py --master 192.168.1.10 --workers 192.168.1.11 192.168.1.12
+
+# For localhost testing (single machine):
+# python cluster_setup.py --master 127.0.0.1 --workers 127.0.0.2 127.0.0.3
