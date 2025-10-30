@@ -13,13 +13,13 @@ import sys
 import os
 import socket
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 
 
 class ClusterSetup:
     """Main class for cluster setup and configuration"""
     
-    def __init__(self, master_ip: str, worker_ips: List[str], username: str = None):
+    def __init__(self, master_ip: str, worker_ips: List[str], username: Optional[str] = None):
         self.master_ip = master_ip
         self.worker_ips = worker_ips
         self.all_ips = [master_ip] + worker_ips
@@ -35,7 +35,7 @@ class ClusterSetup:
         except Exception:
             return False
     
-    def run_command(self, command: str, check: bool = True, shell: bool = True) -> subprocess.CompletedProcess:
+    def run_command(self, command: str, check: bool = True, shell: bool = True) -> Union[subprocess.CompletedProcess, subprocess.CalledProcessError]:
         """Run a shell command and return the result"""
         try:
             result = subprocess.run(
@@ -58,7 +58,7 @@ class ClusterSetup:
         result = self.run_command("sudo -n true", check=False)
         return result.returncode == 0
     
-    def install_homebrew(self):
+    def install_homebrew(self) -> None:
         """Install Homebrew on Ubuntu/WSL"""
         print("\n=== Installing Homebrew ===")
         
@@ -95,7 +95,7 @@ class ClusterSetup:
         
         print("Homebrew installed successfully")
     
-    def setup_ssh(self):
+    def setup_ssh(self) -> None:
         """Setup SSH client and server"""
         print("\n=== Setting up SSH ===")
         
@@ -120,7 +120,7 @@ class ClusterSetup:
         
         print("SSH setup completed")
     
-    def configure_passwordless_ssh(self):
+    def configure_passwordless_ssh(self) -> None:
         """Configure passwordless SSH between nodes"""
         print("\n=== Configuring Passwordless SSH ===")
         
@@ -160,7 +160,7 @@ class ClusterSetup:
         
         print("SSH configuration completed")
     
-    def configure_hosts_file(self):
+    def configure_hosts_file(self) -> None:
         """Configure /etc/hosts with cluster node information"""
         print("\n=== Configuring /etc/hosts ===")
         
@@ -193,7 +193,7 @@ class ClusterSetup:
         else:
             print("/etc/hosts already contains cluster node entries")
     
-    def install_slurm(self):
+    def install_slurm(self) -> None:
         """Install Slurm using Homebrew"""
         print("\n=== Installing Slurm ===")
         
@@ -216,7 +216,7 @@ class ClusterSetup:
         
         print("Slurm installation completed")
     
-    def install_openmpi(self):
+    def install_openmpi(self) -> None:
         """Install OpenMPI using Homebrew"""
         print("\n=== Installing OpenMPI ===")
         
@@ -236,7 +236,7 @@ class ClusterSetup:
         
         print("OpenMPI installation completed")
     
-    def configure_slurm(self):
+    def configure_slurm(self) -> None:
         """Configure Slurm for the cluster"""
         print("\n=== Configuring Slurm ===")
         
@@ -346,7 +346,7 @@ Waittime=0
         
         return conf
     
-    def configure_openmpi(self):
+    def configure_openmpi(self) -> None:
         """Configure OpenMPI for the cluster"""
         print("\n=== Configuring OpenMPI ===")
         
@@ -376,7 +376,7 @@ btl_tcp_if_include = eth0
         
         print("OpenMPI configured successfully")
     
-    def verify_installation(self):
+    def verify_installation(self) -> None:
         """Verify that all components are installed correctly"""
         print("\n=== Verifying Installation ===")
         
@@ -397,7 +397,7 @@ btl_tcp_if_include = eth0
         
         print("\nVerification completed")
     
-    def run_full_setup(self):
+    def run_full_setup(self) -> None:
         """Run the complete cluster setup"""
         print("=" * 60)
         print("CLUSTER SETUP SCRIPT")
@@ -446,7 +446,7 @@ btl_tcp_if_include = eth0
             sys.exit(1)
 
 
-def main():
+def main() -> None:
     """Main entry point for the cluster setup script"""
     parser = argparse.ArgumentParser(
         description="Cluster Setup Script for Slurm and OpenMPI on Ubuntu/WSL"
