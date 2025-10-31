@@ -847,29 +847,43 @@ Waittime=0
         network_config = self._detect_mpi_network_config()
 
         # Create default MCA parameters file
+        # Note: Port ranges help with firewall configuration
+        # btl_tcp_port_min_v4 sets starting port for BTL TCP communication
+        # oob_tcp_port_range sets port range for out-of-band communication (PRRTE)
         mca_params = f"""# OpenMPI MCA parameters
 btl = ^openib
 {network_config}
+
+# Port configuration for firewall-friendly operation
+# BTL (Byte Transfer Layer) TCP ports
+btl_tcp_port_min_v4 = 50000
+
+# Out-of-band (OOB) TCP port range for PRRTE daemon communication
+# This is critical for cross-cluster MPI execution
+oob_tcp_port_range = 50100-50200
 """
         mca_file = Path.home() / ".openmpi" / "mca-params.conf"
         with open(mca_file, 'w') as f:
             f.write(mca_params)
 
         print(f"OpenMPI MCA parameters configured: {network_config}")
+        print("Port ranges: BTL TCP (50000+), OOB TCP (50100-50200)")
         print("OpenMPI configured successfully")
     
     def verify_installation(self):
         """Verify that all components are installed correctly"""
         print("\n=== Verifying Installation ===")
-        
+
         checks = [
             ("SSH", "ssh -V"),
             ("Slurm (sinfo)", "sinfo --version"),
             ("Slurm (scontrol)", "scontrol --version"),
             ("OpenMPI (mpirun)", "mpirun --version"),
             ("OpenMPI (mpicc)", "mpicc --version"),
+            ("PRRTE (prte)", "prte --version"),
+            ("PRRTE (prun)", "prun --version"),
         ]
-        
+
         for name, command in checks:
             result = self.run_command(command, check=False)
             if result.returncode == 0:

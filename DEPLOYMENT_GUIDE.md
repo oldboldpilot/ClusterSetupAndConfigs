@@ -267,9 +267,122 @@ srun -N2 hostname
 ### Test OpenMPI
 
 ```bash
-# Run MPI hello world across nodes
+# Test locally (should work)
+mpirun -np 4 hostname
+
+# Test across cluster (may hang due to PRRTE/firewall issues)
 mpirun -np 4 --hostfile ~/.openmpi/hostfile hostname
 ```
+
+### OpenMPI 5.x PRRTE Troubleshooting
+
+**If MPI hangs when running across cluster nodes**, this is likely due to PRRTE port/firewall issues.
+
+#### What is PRRTE?
+
+PRRTE (PMIx Reference Runtime Environment) is the process management system used by OpenMPI 5.x:
+- Replaces the older ORTE system from OpenMPI 4.x
+- Requires bidirectional network communication between nodes
+- Uses multiple TCP ports, not just SSH port 22
+- Commands: `prte` (start DVM), `prted` (daemon), `prun` (run in DVM)
+
+#### Verify PRRTE Installation
+
+```bash
+# Check PRRTE is installed
+prte --version  # Should show: prte (PRRTE) 3.0.x
+prun --version  # Should show: prun (PRRTE) 3.0.x
+
+# Check OpenMPI MCA configuration
+cat ~/.openmpi/mca-params.conf
+```
+
+Expected configuration (automatically created by script):
+```
+btl = ^openib
+btl_tcp_if_include = 192.168.1.0/24  # Your network range
+
+# Port configuration for firewall-friendly operation
+btl_tcp_port_min_v4 = 50000
+oob_tcp_port_range = 50100-50200
+```
+
+#### Port Requirements
+
+OpenMPI 5.x + PRRTE requires these ports open on **all nodes**:
+- **Port 22**: SSH (for initial connection)
+- **Port 50000+**: BTL TCP communication (message passing)
+- **Ports 50100-50200**: OOB TCP (out-of-band, for PRRTE daemon communication)
+
+#### Firewall Configuration
+
+If you have ufw enabled:
+```bash
+# Check firewall status on all nodes
+sudo ufw status
+
+# If active, allow MPI ports (on all nodes)
+sudo ufw allow 50000:50200/tcp comment 'OpenMPI PRRTE'
+sudo ufw reload
+```
+
+For WSL specifically:
+- WSL port forwarding only forwards SSH (port 22) by default
+- Windows Firewall may also need configuration
+- This is a known limitation that can prevent cross-cluster MPI
+
+#### Debug MPI Hanging Issues
+
+```bash
+# Run with verbose debugging to see where it hangs
+timeout 30 mpirun -np 2 --host master,worker1 \
+  --mca btl_base_verbose 20 \
+  --mca oob_base_verbose 10 \
+  hostname 2>&1 | tee mpi_debug.log
+
+# Check if SSH works (should succeed)
+ssh worker1 hostname
+
+# Check if prted exists on workers
+ssh worker1 "which prted"
+
+# Check network connectivity
+ping -c 3 worker1
+
+# Check which ports are listening
+ss -tlnp | grep -E '50000|50100'
+```
+
+#### Workarounds
+
+If PRRTE-based MPI continues to hang:
+
+**Option 1: Use pdsh for parallel execution** (Recommended for embarrassingly parallel tasks)
+```bash
+brew install pdsh
+pdsh -w 192.168.1.[147,137,96] hostname
+pdsh -w worker[1-2] 'python3 my_script.py'
+```
+
+**Option 2: Use Slurm's srun** (Best for true MPI programs)
+```bash
+srun -N2 --mpi=pmix hostname
+srun -N2 --mpi=pmix ./my_mpi_program
+```
+
+**Option 3: Try OpenMPI 4.x** (Uses older ORTE, less port-dependent)
+```bash
+brew uninstall open-mpi
+brew install open-mpi@4
+```
+
+#### WSL-Specific Issues
+
+Known limitations with OpenMPI + PRRTE on WSL:
+- Windows port forwarding to WSL only covers port 22 (SSH)
+- Dynamic MPI ports (50000-50200) are not automatically forwarded
+- This causes PRRTE daemon communication to hang
+- Best workarounds: Use Slurm's srun or pdsh instead of mpirun
 
 ## Advanced Usage
 
@@ -310,10 +423,12 @@ Enable detailed output by checking the debug messages:
 
 After setup, key files are located at:
 
-- **Slurm configs**: `~/.slurm/slurm.conf`, `~/.slurm/slurmdbd.conf`
+- **Slurm configs**: `/etc/slurm/slurm.conf`, `/etc/slurm/cgroup.conf`
 - **OpenMPI hostfile**: `~/.openmpi/hostfile`
+- **OpenMPI MCA params**: `~/.openmpi/mca-params.conf` (includes port configuration)
 - **SSH keys**: `~/.ssh/id_rsa`, `~/.ssh/id_rsa.pub`
-- **Cluster scripts**: `/usr/local/bin/start-slurm.sh` (with sudo)
+- **Slurm spool**: `/var/spool/slurm/ctld` (master), `/var/spool/slurm/d` (all nodes)
+- **Slurm logs**: `/var/log/slurm/`
 
 ## Security Notes
 

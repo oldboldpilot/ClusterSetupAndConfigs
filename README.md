@@ -439,17 +439,41 @@ sinfo
 - Proper directory permissions for Slurm services
 - Systemctl service management
 
-### OpenMPI Cross-Cluster Issues
+### OpenMPI 5.x and PRRTE Cross-Cluster Issues
 
-**Known Issue**: OpenMPI 5.x may have difficulty executing across remote nodes due to networking or daemon communication issues.
+**Known Issue**: OpenMPI 5.x may have difficulty executing across remote nodes due to PRRTE daemon communication and port requirements.
 
 **Symptoms**:
 - `mpirun` with `--host` or `--hostfile` hangs after SSH connection
 - Works fine locally but not across nodes
+- SSH connectivity works, but MPI programs don't execute
 
-**Root Cause**: OpenMPI 5.x uses PRRTE (prted) for process management, which requires bidirectional network communication between nodes. WSL and some network configurations may block the required ports or protocols.
+**Root Cause**: OpenMPI 5.x uses **PRRTE (PMIx Reference Runtime Environment)** for process management, which requires:
+1. Bidirectional network communication between all nodes
+2. Multiple TCP ports for daemon communication (not just SSH port 22)
+3. Proper firewall configuration to allow OOB (out-of-band) communication
 
-**Configuration Issue Fixed**: The script originally hardcoded `btl_tcp_if_include = eth0`, but:
+**What is PRRTE?**
+- PRRTE is the runtime daemon system used by OpenMPI 5.x (replaces the older ORTE)
+- Commands: `prte` (start DVM), `prted` (daemon), `prun` (run programs in DVM)
+- Requires ports for PMIx and OOB TCP communication between nodes
+- Installed automatically with OpenMPI 5.x via Homebrew
+
+**Port Requirements**:
+The script now configures the following ports in `~/.openmpi/mca-params.conf`:
+- **BTL TCP ports**: Starting from port 50000 (`btl_tcp_port_min_v4 = 50000`)
+- **OOB TCP port range**: 50100-50200 (`oob_tcp_port_range = 50100-50200`)
+
+**Firewall Configuration**:
+If you have a firewall enabled (ufw, iptables, Windows Firewall), you must allow these ports:
+```bash
+# On Ubuntu/WSL with ufw (if enabled)
+sudo ufw allow 50000:50200/tcp comment 'OpenMPI PRRTE'
+```
+
+For WSL specifically, Windows Firewall may also need configuration to allow these ports.
+
+**Network Interface Configuration Fixed**: The script originally hardcoded `btl_tcp_if_include = eth0`, but:
 - eth0 is often DOWN on many systems
 - The actual cluster network is typically on eth1 or other interfaces
 - **Solution**: Script now auto-detects the correct network interface and uses IP ranges (e.g., `192.168.1.0/24`) instead of interface names for better reliability
@@ -476,10 +500,22 @@ pdsh -R exec -w 192.168.1.[137,96] command
 - ✅ No complex daemon or network requirements
 - ✅ Perfect for embarrassingly parallel tasks
 
+**Verifying PRRTE Installation**:
+```bash
+# Check PRRTE is installed
+prte --version
+prun --version
+
+# View configured MPI ports
+cat ~/.openmpi/mca-params.conf
+```
+
 **For True MPI Programs**:
-- Consider using Slurm's `srun` instead of `mpirun`
-- Or test with OpenMPI 4.x which uses older orted mechanism
-- Ensure all required ports are open for MPI communication
+- **Best option**: Use Slurm's `srun` instead of `mpirun` (Slurm handles process management)
+- **Alternative**: Test with OpenMPI 4.x which uses older orted mechanism (less port-dependent)
+- **WSL-specific**: Windows port forwarding only forwards SSH port 22, not the dynamic MPI ports
+- **Debugging**: Add `--mca btl_base_verbose 20 --mca oob_base_verbose 10` to mpirun for detailed logging
+- Ensure all required ports (50000-50200) are open in firewalls on all nodes
 
 ### For Detailed Troubleshooting
 
