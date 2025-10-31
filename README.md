@@ -264,8 +264,12 @@ uv run python cluster_setup.py --config cluster_config.yaml --password
 # Test Slurm
 sinfo
 
-# Test OpenMPI
+# Test OpenMPI (local only)
 mpirun -np 2 hostname
+
+# Test parallel execution across cluster with pdsh
+brew install pdsh
+pdsh -w 192.168.1.[147,137,96] hostname
 ```
 
 ## What the Script Does
@@ -435,15 +439,42 @@ sinfo
 - Proper directory permissions for Slurm services
 - Systemctl service management
 
-### OpenMPI Issues
+### OpenMPI Cross-Cluster Issues
+
+**Known Issue**: OpenMPI 5.x may have difficulty executing across remote nodes due to networking or daemon communication issues.
+
+**Symptoms**:
+- `mpirun` with `--host` or `--hostfile` hangs after SSH connection
+- Works fine locally but not across nodes
+
+**Root Cause**: OpenMPI 5.x uses PRRTE (prted) for process management, which requires bidirectional network communication between nodes. WSL and some network configurations may block the required ports or protocols.
+
+**Workaround - Use pdsh for Parallel Execution**:
 
 ```bash
-# Test MPI locally first
-mpirun -np 2 hostname
+# Install pdsh
+brew install pdsh
 
-# Check network connectivity
-ping worker1
+# Run commands across all nodes
+pdsh -w 192.168.1.[147,137,96] hostname
+
+# Execute Python scripts in parallel
+pdsh -w 192.168.1.[147,137,96] 'python3 /path/to/script.py'
+
+# Run with custom SSH options
+pdsh -R exec -w 192.168.1.[137,96] command
 ```
+
+**pdsh Benefits**:
+- ✅ Simple and reliable parallel execution
+- ✅ Works immediately with existing SSH setup
+- ✅ No complex daemon or network requirements
+- ✅ Perfect for embarrassingly parallel tasks
+
+**For True MPI Programs**:
+- Consider using Slurm's `srun` instead of `mpirun`
+- Or test with OpenMPI 4.x which uses older orted mechanism
+- Ensure all required ports are open for MPI communication
 
 ### For Detailed Troubleshooting
 
