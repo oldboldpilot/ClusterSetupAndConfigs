@@ -439,19 +439,28 @@ sinfo
 - Proper directory permissions for Slurm services
 - Systemctl service management
 
-### OpenMPI 5.x and PRRTE Cross-Cluster Issues
+### MPI Cross-Cluster Execution Limitations on WSL
 
-**Known Issue**: OpenMPI 5.x may have difficulty executing across remote nodes due to PRRTE daemon communication and port requirements.
+**Known Issue**: Both OpenMPI 5.x and MPICH 4.x have difficulty executing across remote nodes in WSL environments.
 
 **Symptoms**:
 - `mpirun` with `--host` or `--hostfile` hangs after SSH connection
-- Works fine locally but not across nodes
+- Works fine locally (single node) but fails across nodes
 - SSH connectivity works, but MPI programs don't execute
+- Socket write errors: "Bad file descriptor" or "write error"
 
-**Root Cause**: OpenMPI 5.x uses **PRRTE (PMIx Reference Runtime Environment)** for process management, which requires:
-1. Bidirectional network communication between all nodes
-2. Multiple TCP ports for daemon communication (not just SSH port 22)
-3. Proper firewall configuration to allow OOB (out-of-band) communication
+**Root Cause**: This is a **fundamental WSL networking limitation** affecting MPI process managers:
+- **OpenMPI 5.x** uses PRRTE (PMIx Reference Runtime Environment) for process management
+- **MPICH 4.x** uses Hydra process manager
+- Both require bidirectional network communication between all nodes
+- Both require multiple TCP ports for daemon communication (not just SSH port 22)
+- WSL's network architecture blocks these process manager communications
+
+**Testing Results**:
+- ✅ **Local execution works**: Both OpenMPI and MPICH can run multiple processes on a single node
+- ✅ **SSH connectivity works**: Can SSH to remote nodes without issues
+- ❌ **Cross-cluster MPI fails**: Process managers fail to establish socket connections between nodes
+- ❌ **Windows Firewall scripts insufficient**: Even with firewall rules configured, socket communication fails
 
 **What is PRRTE?**
 - PRRTE is the runtime daemon system used by OpenMPI 5.x (replaces the older ORTE)
@@ -459,7 +468,13 @@ sinfo
 - Requires ports for PMIx and OOB TCP communication between nodes
 - Installed automatically with OpenMPI 5.x via Homebrew
 
-**Port Requirements**:
+**What is Hydra?**
+- Hydra is the process manager used by MPICH
+- Uses PMI (Process Management Interface) for communication
+- Similar socket-based communication requirements as PRRTE
+- Exhibits same cross-cluster failures on WSL
+
+**Port Requirements for OpenMPI**:
 The script now configures the following ports in `~/.openmpi/mca-params.conf`:
 - **BTL TCP ports**: Starting from port 50000 (`btl_tcp_port_min_v4 = 50000`)
 - **OOB TCP port range**: 50100-50200 (`oob_tcp_port_range = 50100-50200`)
@@ -526,12 +541,28 @@ prun --version
 cat ~/.openmpi/mca-params.conf
 ```
 
-**For True MPI Programs**:
-- **Best option**: Use Slurm's `srun` instead of `mpirun` (Slurm handles process management)
-- **Alternative**: Test with OpenMPI 4.x which uses older orted mechanism (less port-dependent)
-- **WSL-specific**: Windows port forwarding only forwards SSH port 22, not the dynamic MPI ports
-- **Debugging**: Add `--mca btl_base_verbose 20 --mca oob_base_verbose 10` to mpirun for detailed logging
-- Ensure all required ports (50000-50200) are open in firewalls on all nodes
+**Recommended Alternatives for WSL Cross-Cluster Execution**:
+
+1. **Use Slurm's `srun`** (Best option for true MPI programs):
+   ```bash
+   # Slurm handles process management without MPI daemons
+   srun -N 2 -n 6 hostname
+   srun -N 3 python my_mpi_program.py
+   ```
+
+2. **Use pdsh for embarrassingly parallel tasks** (Simplest):
+   ```bash
+   pdsh -w 192.168.1.[147,137,96] 'python3 script.py'
+   ```
+
+3. **Native Linux** (Not WSL):
+   - If you need true MPI across clusters, consider running on native Linux instead of WSL
+   - OpenMPI and MPICH work properly on native Linux with correct firewall configuration
+
+**Not Recommended** (tested and confirmed to fail on WSL):
+- ❌ OpenMPI 4.x - Same issues with orted daemon communication
+- ❌ MPICH - Same socket communication failures
+- ❌ Windows Firewall/port forwarding - Insufficient to solve the underlying issue
 
 ### For Detailed Troubleshooting
 
