@@ -1,0 +1,12 @@
+# This project uses uv for dependency management
+# Dependencies are defined in pyproject.toml
+# 
+# To install dependencies:
+#   export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+#   uv sync --python /home/linuxbrew/.linuxbrew/bin/python3.13
+#
+# Or using pip (if uv is not available):
+#   pip install -r requirements.txt
+
+PyYAML>=6.0
+textual>=0.47.0

@@ -1,0 +1,2 @@
+[tool.uv]
+virtual-env-directory = "~/.venvs/cluster-setup"

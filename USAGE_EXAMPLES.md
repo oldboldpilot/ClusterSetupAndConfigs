@@ -1,36 +1,102 @@
 # Usage Examples for Cluster Setup Script
 
+## Important: Node Detection
+
+**The script automatically detects which node it's running on.** For automatic worker setup, you MUST run it from the master node.
+
+### Verify Your Node Before Running
+
+```bash
+# Check your local IP addresses
+ip addr show | grep "inet "
+
+# Example output:
+#   inet 127.0.0.1/8 scope host lo
+#   inet 192.168.1.10/24 brd 192.168.1.255 scope global eth0
+#                ^ This should match your master_ip in config
+```
+
+When you run the script, it will show:
+```
+DEBUG: hostname='node1', local_ip='127.0.1.1', master_ip='192.168.1.10'
+DEBUG: Found IPs on interfaces: ['127.0.0.1', '192.168.1.10', '172.17.0.1']
+Current node is: MASTER  ← Should see this if on correct node
+```
+
 ## Basic Setup
 
 ### Example 1: Simple 3-Node Cluster
 
+Create a configuration file `cluster_config.yaml`:
+
+```yaml
+master_ip: "192.168.1.10"
+worker_ips:
+  - "192.168.1.11"
+  - "192.168.1.12"
+username: "myuser"  # optional, defaults to current user
+```
+
+**Run from the master node (192.168.1.10)** with automatic setup:
 ```bash
-# On all nodes (master and workers), run:
-python cluster_setup.py --master 192.168.1.10 --workers 192.168.1.11 192.168.1.12
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_setup.py --config cluster_config.yaml --password
+# Enter password when prompted - script will automatically setup all workers
 ```
 
 ### Example 2: Larger Cluster with 5 Workers
 
+Configuration file `large_cluster.yaml`:
+
+```yaml
+master_ip: "10.0.0.10"
+worker_ips:
+  - "10.0.0.11"
+  - "10.0.0.12"
+  - "10.0.0.13"
+  - "10.0.0.14"
+  - "10.0.0.15"
+username: "admin"
+```
+
 ```bash
-python cluster_setup.py \
-  --master 10.0.0.10 \
-  --workers 10.0.0.11 10.0.0.12 10.0.0.13 10.0.0.14 10.0.0.15
+# MUST be run from 10.0.0.10 for automatic worker setup
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_setup.py --config large_cluster.yaml --password
 ```
 
 ### Example 3: Local Testing with Localhost
 
-```bash
-# For single-machine testing
-python cluster_setup.py --master localhost --workers 127.0.0.2 127.0.0.3
+Configuration file `local_test.yaml`:
+
+```yaml
+master_ip: "localhost"
+worker_ips:
+  - "127.0.0.2"
+  - "127.0.0.3"
+username: "testuser"
 ```
 
-### Example 4: Custom Username
+```bash
+# For single-machine testing
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_setup.py --config local_test.yaml
+```
+
+### Example 4: Manual Setup (Without Automatic Worker Setup)
+
+If you prefer to setup each node manually without providing a password:
 
 ```bash
-python cluster_setup.py \
-  --master 192.168.1.10 \
-  --workers 192.168.1.11 192.168.1.12 \
-  --username admin
+# On master node (192.168.1.10)
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_setup.py --config cluster_config.yaml
+
+# Then manually on each worker node
+ssh worker1
+cd /path/to/ClusterSetupAndConfigs
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_setup.py --config cluster_config.yaml
 ```
 
 ## Step-by-Step Workflow
@@ -43,7 +109,19 @@ Ensure all nodes have:
 - Same username on all nodes
 - Sudo access
 
-### 2. Run Setup on Master Node
+### 2. Create Configuration File
+
+Create `cluster_config.yaml`:
+
+```yaml
+master: 192.168.1.10
+workers:
+  - 192.168.1.11
+  - 192.168.1.12
+username: myuser
+```
+
+### 3. Run Automatic Setup (Recommended)
 
 ```bash
 # SSH into master node
@@ -53,51 +131,40 @@ ssh user@192.168.1.10
 git clone https://github.com/oldboldpilot/ClusterSetupAndConfigs.git
 cd ClusterSetupAndConfigs
 
-# Run the setup script
-python cluster_setup.py --master 192.168.1.10 --workers 192.168.1.11 192.168.1.12
+# Run the setup script with --password flag for automatic full cluster setup
+python cluster_setup.py --config cluster_config.yaml --password
+# Enter password when prompted
 ```
 
-The script will:
-- Install Homebrew
-- Install and configure SSH
-- Generate SSH keys
-- Configure /etc/hosts
-- Install Slurm and OpenMPI
-- Start Slurm controller (slurmctld) on master
-- Start Slurm daemon (slurmd)
-- Create OpenMPI configuration
+The script will **automatically**:
+1. Install Homebrew on master
+2. Install and configure SSH on master
+3. Generate SSH keys on master
+4. **Copy SSH keys to all worker nodes**
+5. **Connect to each worker via SSH**
+6. **Run full setup on each worker remotely**
+7. Configure /etc/hosts on all nodes
+8. Install Slurm and OpenMPI on all nodes
+9. Start Slurm controller (slurmctld) on master
+10. Start Slurm daemon (slurmd) on all nodes
+11. Create OpenMPI configuration on all nodes
 
-### 3. Copy SSH Key to Workers
+**That's it!** Your entire cluster is now configured with a single command.
 
-After setup on master, you'll see output like:
+### 3b. Manual Setup (Alternative)
 
-```
-Public key content:
-ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQ... user@master
-
-NOTE: You need to manually copy this public key to all other nodes
-On each node, add this key to /home/user/.ssh/authorized_keys
-```
-
-Copy the public key and add it to each worker's `~/.ssh/authorized_keys` file.
-
-### 4. Run Setup on Each Worker Node
+If automatic setup is not desired or fails:
 
 ```bash
-# SSH into worker1
-ssh user@192.168.1.11
+# On master node
+python cluster_setup.py --config cluster_config.yaml
 
-# Clone the repository
-git clone https://github.com/oldboldpilot/ClusterSetupAndConfigs.git
-cd ClusterSetupAndConfigs
-
-# Run the same setup command
-python cluster_setup.py --master 192.168.1.10 --workers 192.168.1.11 192.168.1.12
-
-# Repeat for worker2, etc.
+# Manually copy SSH key to workers
+# Then on each worker node:
+python cluster_setup.py --config cluster_config.yaml
 ```
 
-### 5. Verify Setup
+### 4. Verify Setup
 
 On the master node:
 
@@ -120,7 +187,7 @@ ssh worker2 hostname
 mpirun -np 4 -hostfile ~/.openmpi/hostfile hostname
 ```
 
-### 6. Submit Test Jobs
+### 5. Submit Test Jobs
 
 #### Slurm Job Examples
 
@@ -195,13 +262,20 @@ To add a new worker node:
 5. Restart Slurm services
 
 ```bash
-# On all nodes, add to /etc/hosts:
-echo "192.168.1.13    worker3 worker-node3" | sudo tee -a /etc/hosts
+# Update cluster_config.yaml to include the new worker:
+# master: 192.168.1.10
+# workers:
+#   - 192.168.1.11
+#   - 192.168.1.12
+#   - 192.168.1.13
 
-# On new node:
-python cluster_setup.py --master 192.168.1.10 --workers 192.168.1.11 192.168.1.12 192.168.1.13
+# On master node, re-run setup to update configuration:
+python cluster_setup.py --config cluster_config.yaml --password
 
-# On master, update slurm.conf to include worker3, then:
+# Or manually on the new node:
+python cluster_setup.py --config cluster_config.yaml
+
+# Then restart Slurm services:
 sudo scontrol reconfigure
 ```
 
@@ -253,6 +327,53 @@ sudo apt-get update
 sudo apt-get install -y slurm-wlm openmpi-bin
 
 # The script will fall back to apt automatically
+```
+
+### Issue: Script detects WORKER instead of MASTER
+
+**Symptom**: Output shows "Current node is: WORKER" when you're on the master node
+
+**Diagnosis**:
+```bash
+# Check the debug output from the script:
+# DEBUG: hostname='...', local_ip='...', master_ip='...'
+# DEBUG: Found IPs on interfaces: [...]
+
+# Manually check your IPs
+ip addr show | grep "inet "
+```
+
+**Solution**:
+1. Verify the `master_ip` in your config file matches one of your local IPs
+2. If IPs don't match, update the config file with the correct master IP
+3. If you're not on the master node, SSH to the correct node and run from there
+
+**Example**:
+```bash
+# Config says master_ip: "192.168.1.147"
+# But your IPs are: ['127.0.0.1', '172.25.40.179', '10.1.96.192']
+# → master_ip not found in local IPs
+
+# Solution: Either update config or run from 192.168.1.147
+ssh 192.168.1.147
+cd /path/to/ClusterSetupAndConfigs
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_setup.py --config cluster_config.yaml --password
+```
+
+### Issue: sudo password errors
+
+**Symptom**: `sudo: no password was provided` or permission denied
+
+**Solution**: The script now handles this automatically via secure stdin piping. If issues persist:
+```bash
+# Verify sudo access
+sudo -l
+
+# Check if another package manager process is running
+ps aux | grep -E 'apt|dpkg'
+
+# Wait for other processes to complete, then retry
 ```
 
 ## Performance Tuning

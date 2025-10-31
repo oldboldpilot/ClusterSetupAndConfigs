@@ -49,3 +49,5 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+#yaml
+cluster_config_actual.yaml

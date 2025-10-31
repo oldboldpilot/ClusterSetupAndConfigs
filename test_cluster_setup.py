@@ -27,8 +27,8 @@ def test_help_message():
         text=True
     )
     assert result.returncode == 0, "Help command failed"
-    assert '--master' in result.stdout, "Missing --master option in help"
-    assert '--workers' in result.stdout, "Missing --workers option in help"
+    assert '--config' in result.stdout, "Missing --config option in help"
+    assert '--password' in result.stdout, "Missing --password option in help"
     print("✓ Help message test passed")
 
 
@@ -46,13 +46,24 @@ def test_missing_arguments():
 
 def test_invalid_ip():
     """Test that the script validates IP addresses"""
-    result = subprocess.run(
-        ['python3', 'cluster_setup.py', '--master', 'invalid', '--workers', '192.168.1.11'],
-        capture_output=True,
-        text=True
-    )
-    assert result.returncode != 0, "Script should fail with invalid IP"
-    print("✓ Invalid IP validation test passed")
+    # Create a temporary invalid config file
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write("master: invalid_ip\nworkers:\n  - 192.168.1.11\n")
+        temp_config = f.name
+
+    try:
+        result = subprocess.run(
+            ['python3', 'cluster_setup.py', '--config', temp_config],
+            capture_output=True,
+            text=True
+        )
+        assert result.returncode != 0, "Script should fail with invalid IP"
+        assert 'invalid' in result.stdout.lower() or 'error' in result.stdout.lower()
+        print("✓ Invalid IP validation test passed")
+    finally:
+        import os
+        os.unlink(temp_config)
 
 
 def test_file_structure():
@@ -77,24 +88,114 @@ def test_script_imports():
     try:
         # Add current directory to path
         sys.path.insert(0, str(Path.cwd()))
-        
+
         # Import without executing main
         import cluster_setup
-        
-        # Check that key classes exist
+
+        # Check that key classes and functions exist
         assert hasattr(cluster_setup, 'ClusterSetup')
         assert hasattr(cluster_setup, 'main')
-        
+        assert hasattr(cluster_setup, 'load_yaml_config')
+
         print("✓ Import test passed")
     except Exception as e:
         print(f"✗ Import test failed: {e}")
         raise
 
 
+def test_valid_config_loading():
+    """Test loading a valid configuration file"""
+    import tempfile
+    import yaml
+
+    # Create a temporary valid config file
+    config_data = {
+        'master': '192.168.1.100',
+        'workers': ['192.168.1.101', '192.168.1.102'],
+        'username': 'testuser'
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        yaml.dump(config_data, f)
+        temp_config = f.name
+
+    try:
+        sys.path.insert(0, str(Path.cwd()))
+        from cluster_setup import load_yaml_config
+
+        config = load_yaml_config(temp_config)
+
+        assert config['master'] == '192.168.1.100', "Master IP not loaded correctly"
+        assert len(config['workers']) == 2, "Workers not loaded correctly"
+        assert config['username'] == 'testuser', "Username not loaded correctly"
+
+        print("✓ Valid config loading test passed")
+    finally:
+        import os
+        os.unlink(temp_config)
+
+
+def test_cluster_setup_class():
+    """Test ClusterSetup class initialization"""
+    try:
+        sys.path.insert(0, str(Path.cwd()))
+        from cluster_setup import ClusterSetup
+
+        # Create a ClusterSetup instance
+        setup = ClusterSetup(
+            master_ip='192.168.1.100',
+            worker_ips=['192.168.1.101', '192.168.1.102'],
+            username='testuser'
+        )
+
+        assert setup.master_ip == '192.168.1.100', "Master IP not set correctly"
+        assert len(setup.worker_ips) == 2, "Worker IPs not set correctly"
+        assert setup.username == 'testuser', "Username not set correctly"
+        assert len(setup.all_ips) == 3, "all_ips should contain master + workers"
+
+        print("✓ ClusterSetup class test passed")
+    except Exception as e:
+        print(f"✗ ClusterSetup class test failed: {e}")
+        raise
+
+
+def test_ip_validation():
+    """Test IP address validation in main function"""
+    import tempfile
+
+    # Test valid IPs
+    valid_ips = ['192.168.1.1', '10.0.0.1', '127.0.0.1', 'localhost']
+    for ip in valid_ips:
+        config_data = f"master: {ip}\nworkers:\n  - 192.168.1.2\n"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(config_data)
+            temp_config = f.name
+
+        try:
+            # Just check it doesn't crash on IP validation
+            # (it will fail later on sudo check, but that's OK)
+            result = subprocess.run(
+                ['python3', 'cluster_setup.py', '--config', temp_config],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            # Should not fail with IP validation error
+            assert 'Invalid' not in result.stdout or 'IP' not in result.stdout
+        except subprocess.TimeoutExpired:
+            # Timeout is OK - means it passed validation and started running
+            pass
+        finally:
+            import os
+            os.unlink(temp_config)
+
+    print("✓ IP validation test passed")
+
+
 def main():
     """Run all tests"""
     print("Running cluster_setup.py tests...\n")
-    
+
     tests = [
         test_file_structure,
         test_script_syntax,
@@ -102,6 +203,9 @@ def main():
         test_missing_arguments,
         test_invalid_ip,
         test_script_imports,
+        test_valid_config_loading,
+        test_cluster_setup_class,
+        test_ip_validation,
     ]
     
     failed = 0

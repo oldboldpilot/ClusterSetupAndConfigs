@@ -4,8 +4,24 @@ Cluster Setup Script for Slurm and OpenMPI
 Supports Ubuntu Linux and WSL with Ubuntu
 
 Usage:
-    python cluster_setup.py --master <master_ip> --workers <worker_ip1> <worker_ip2> ...
-    python cluster_setup.py --config config.yml
+    python cluster_setup.py --config config.yml [--password]
+    
+    --config:   Path to YAML configuration file (required)
+    --password: Prompt for password to automatically setup entire cluster (optional)
+
+When run with --password on the master node:
+    1. Sets up the master node (password is used for sudo commands)
+    2. Copies SSH keys to all worker nodes
+    3. Automatically runs the setup on each worker node via SSH
+    4. Password is automatically provided for sudo commands on worker nodes
+    5. Configures the entire cluster in one command without manual intervention
+
+Example:
+    # Full automatic cluster setup (recommended)
+    python cluster_setup.py --config cluster_config.yaml --password
+    
+    # Manual setup (without --password, you must run on each node separately)
+    python cluster_setup.py --config cluster_config.yaml
 """
 
 import argparse
@@ -14,6 +30,7 @@ import sys
 import os
 import shutil
 import socket
+import getpass
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -27,11 +44,12 @@ except Exception:
 class ClusterSetup:
     """Main class for cluster setup and configuration"""
     
-    def __init__(self, master_ip: str, worker_ips: List[str], username: Optional[str] = None):
+    def __init__(self, master_ip: str, worker_ips: List[str], username: Optional[str] = None, password: Optional[str] = None):
         self.master_ip = master_ip
         self.worker_ips = worker_ips
         self.all_ips = [master_ip] + worker_ips
         self.username = username or os.getenv('USER', 'ubuntu')
+        self.password = password
         self.is_master = self._is_current_node_master()
         
     def _is_current_node_master(self) -> bool:
@@ -39,27 +57,86 @@ class ClusterSetup:
         try:
             hostname = socket.gethostname()
             local_ip = socket.gethostbyname(hostname)
-            return local_ip == self.master_ip or self.master_ip in ['localhost', '127.0.0.1']
-        except Exception:
+            
+            # Debug output
+            print(f"DEBUG: hostname='{hostname}', local_ip='{local_ip}', master_ip='{self.master_ip}'")
+            
+            # Check if master_ip is localhost
+            if self.master_ip in ['localhost', '127.0.0.1']:
+                return True
+            
+            # Check if local_ip matches master_ip
+            if local_ip == self.master_ip:
+                return True
+            
+            # Also check using ip addr command to find all IPs
+            try:
+                result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, check=False)
+                if result.returncode == 0:
+                    import re
+                    # Look for lines like "inet 192.168.1.147/24 ..."
+                    ip_pattern = r'inet\s+(\d+\.\d+\.\d+\.\d+)'
+                    found_ips = re.findall(ip_pattern, result.stdout)
+                    print(f"DEBUG: Found IPs on interfaces: {found_ips}")
+                    if self.master_ip in found_ips:
+                        print(f"DEBUG: Found matching IP {self.master_ip}")
+                        return True
+            except Exception as e:
+                print(f"DEBUG: Could not check network interfaces: {e}")
+            
+            return False
+        except Exception as e:
+            print(f"DEBUG: Error detecting node role: {e}")
             return False
     
     def run_command(self, command: str, check: bool = True, shell: bool = True) -> subprocess.CompletedProcess:
         """Run a shell command and return the result"""
-        try:
-            result = subprocess.run(
-                command,
-                shell=shell,
-                check=check,
-                capture_output=True,
+        result = subprocess.run(
+            command,
+            shell=shell,
+            check=False,
+            capture_output=True,
+            text=True
+        )
+        
+        if check and result.returncode != 0:
+            print(f"Error executing command: {command}")
+            print(f"Error output: {result.stderr}")
+            raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
+        
+        return result
+    
+    def run_sudo_command(self, command: str, check: bool = True) -> subprocess.CompletedProcess:
+        """Run a command with sudo, using password if available"""
+        if self.password:
+            # Use subprocess.Popen to pipe password securely to sudo
+            sudo_cmd = f"sudo -S {command}"
+            process = subprocess.Popen(
+                sudo_cmd,
+                shell=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True
             )
+            stdout, stderr = process.communicate(input=f"{self.password}\n")
+            
+            result = subprocess.CompletedProcess(
+                args=sudo_cmd,
+                returncode=process.returncode,
+                stdout=stdout,
+                stderr=stderr
+            )
+            
+            if check and result.returncode != 0:
+                print(f"Error executing command: {sudo_cmd}")
+                print(f"Error output: {stderr}")
+                raise subprocess.CalledProcessError(result.returncode, sudo_cmd, stdout, stderr)
+            
             return result
-        except subprocess.CalledProcessError as e:
-            print(f"Error executing command: {command}")
-            print(f"Error output: {e.stderr}")
-            if check:
-                raise
-            return e
+        else:
+            # Try without password (may prompt user)
+            return self.run_command(f"sudo {command}", check=check)
     
     def check_sudo_access(self) -> bool:
         """Check if user has sudo access"""
@@ -77,8 +154,8 @@ class ClusterSetup:
         
         # Install dependencies for Homebrew
         print("Installing Homebrew dependencies...")
-        self.run_command(
-            "sudo apt-get update && sudo apt-get install -y build-essential procps curl file git"
+        self.run_sudo_command(
+            "apt-get update && apt-get install -y build-essential procps curl file git"
         )
         
         # Install Homebrew
@@ -98,7 +175,7 @@ class ClusterSetup:
             shell_profile = Path.home() / ".bashrc"
             with open(shell_profile, 'a') as f:
                 f.write('\n# Homebrew\n')
-                f.write('eval "$({homebrew_path}/brew shellenv)"\n')
+                f.write(f'eval "$({homebrew_path}/brew shellenv)"\n')
         
         print("Homebrew installed successfully")
     
@@ -108,13 +185,13 @@ class ClusterSetup:
         
         # Install OpenSSH client and server
         print("Installing OpenSSH client and server...")
-        self.run_command("sudo apt-get update", check=False)
-        self.run_command("sudo apt-get install -y openssh-client openssh-server")
+        self.run_sudo_command("apt-get update", check=False)
+        self.run_sudo_command("apt-get install -y openssh-client openssh-server")
         
         # Start SSH service
         print("Starting SSH service...")
-        self.run_command("sudo service ssh start", check=False)
-        self.run_command("sudo systemctl enable ssh", check=False)
+        self.run_sudo_command("service ssh start", check=False)
+        self.run_sudo_command("systemctl enable ssh", check=False)
         
         # Generate SSH key if it doesn't exist
         ssh_dir = Path.home() / ".ssh"
@@ -152,8 +229,14 @@ class ClusterSetup:
             
             print("Public key added to authorized_keys")
             print(f"\nPublic key content:\n{pub_key}")
-            print("\nNOTE: You need to manually copy this public key to all other nodes")
-            print(f"On each node, add this key to {authorized_keys}")
+            
+            # Automatically copy SSH key to worker nodes if password is provided
+            if self.password and self.worker_ips:
+                print("\n=== Copying SSH key to worker nodes ===")
+                self._copy_ssh_key_to_workers()
+            else:
+                print("\nNOTE: You need to manually copy this public key to all other nodes")
+                print(f"On each node, add this key to {authorized_keys}")
         
         # Configure SSH to not require strict host key checking (for cluster setup)
         ssh_config = ssh_dir / "config"
@@ -163,6 +246,233 @@ class ClusterSetup:
         ssh_config.chmod(0o600)
         
         print("SSH configuration completed")
+    
+    def _copy_ssh_key_to_workers(self):
+        """Copy SSH public key to all worker nodes using sshpass"""
+        import tempfile
+        
+        if not self.password:
+            print("Error: Password is required for SSH key copying")
+            return
+        
+        # Check if sshpass is installed
+        if not shutil.which("sshpass"):
+            print("Installing sshpass for automatic SSH key copying...")
+            try:
+                # Wait for any other apt processes to finish and update/install sshpass
+                self.run_sudo_command("while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done", check=False)
+                self.run_sudo_command("apt-get update", check=True)
+                self.run_sudo_command("apt-get install -y sshpass", check=True)
+            except Exception as e:
+                print(f"Failed to install sshpass: {e}")
+                print("Please install sshpass manually: sudo apt-get install -y sshpass")
+                print("Or copy SSH keys manually to worker nodes")
+                return
+        
+        ssh_dir = Path.home() / ".ssh"
+        pub_key_path = ssh_dir / "id_rsa.pub"
+        
+        if not pub_key_path.exists():
+            print("Error: SSH public key not found")
+            return
+        
+        with open(pub_key_path, 'r') as f:
+            pub_key = f.read().strip()
+        
+        for worker_ip in self.worker_ips:
+            print(f"Copying SSH key to {worker_ip}...")
+            try:
+                # Use sshpass to copy the key
+                # We'll use a temporary file for the password to avoid command line exposure
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_pass:
+                    temp_pass.write(self.password)
+                    temp_pass_path = temp_pass.name
+                
+                try:
+                    # Create .ssh directory on remote host if it doesn't exist
+                    cmd = f'sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} "mkdir -p ~/.ssh && chmod 700 ~/.ssh"'
+                    self.run_command(cmd, check=True)
+                    
+                    # Append public key to authorized_keys on remote host
+                    cmd = f'sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} "echo \'{pub_key}\' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"'
+                    self.run_command(cmd, check=True)
+                    
+                    print(f"✓ Successfully copied SSH key to {worker_ip}")
+                finally:
+                    # Clean up temporary password file
+                    os.unlink(temp_pass_path)
+                    
+            except Exception as e:
+                print(f"✗ Failed to copy SSH key to {worker_ip}: {e}")
+                print(f"  You may need to manually copy the key to this node")
+        
+        print("\nSSH key distribution completed")
+    
+    def _setup_worker_node(self, worker_ip: str, config_file: str):
+        """Setup a worker node remotely via SSH"""
+        import tempfile
+        
+        print(f"\n{'=' * 60}")
+        print(f"Setting up worker node: {worker_ip}")
+        print(f"{'=' * 60}")
+        
+        if not self.password:
+            print("Error: Password required for worker setup")
+            return False
+        
+        try:
+            # First, copy the config file to the worker node
+            temp_config = f"/tmp/cluster_config_{os.getpid()}.yaml"
+            print(f"Copying configuration file to {worker_ip}...")
+            copy_cmd = f"scp -o StrictHostKeyChecking=no {config_file} {self.username}@{worker_ip}:{temp_config}"
+            self.run_command(copy_cmd, check=True)
+            
+            # Copy the cluster_setup.py script to the worker node
+            script_path = os.path.abspath(__file__)
+            temp_script = f"/tmp/cluster_setup_{os.getpid()}.py"
+            print(f"Copying setup script to {worker_ip}...")
+            copy_script_cmd = f"scp -o StrictHostKeyChecking=no {script_path} {self.username}@{worker_ip}:{temp_script}"
+            self.run_command(copy_script_cmd, check=True)
+            
+            # Make the script executable
+            chmod_cmd = f"ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'chmod +x {temp_script}'"
+            self.run_command(chmod_cmd, check=True)
+            
+            # Create a temporary password file for sudo
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_pass_file:
+                temp_pass_file.write(self.password)
+                temp_pass_path = temp_pass_file.name
+            
+            try:
+                # Configure passwordless sudo for the user (temporary, for installation)
+                print(f"Configuring sudo access on {worker_ip}...")
+                
+                # Create a wrapper script that handles sudo with password
+                wrapper_script = f"""#!/bin/bash
+# Wrapper script to run cluster setup with sudo password handling
+
+# Create a helper function for sudo with password
+export SUDO_ASKPASS=/tmp/askpass_{os.getpid()}.sh
+cat > $SUDO_ASKPASS << 'ASKPASS_EOF'
+#!/bin/bash
+echo '{self.password}'
+ASKPASS_EOF
+chmod +x $SUDO_ASKPASS
+
+# Run the setup script with sudo -A (use askpass)
+export SUDO_ASKPASS
+python3 {temp_script} --config {temp_config}
+
+# Cleanup
+rm -f $SUDO_ASKPASS
+"""
+                
+                temp_wrapper = f"/tmp/wrapper_{os.getpid()}.sh"
+                
+                # Copy wrapper script to worker
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.sh') as local_wrapper:
+                    local_wrapper.write(wrapper_script)
+                    local_wrapper_path = local_wrapper.name
+                
+                try:
+                    copy_wrapper_cmd = f"scp -o StrictHostKeyChecking=no {local_wrapper_path} {self.username}@{worker_ip}:{temp_wrapper}"
+                    self.run_command(copy_wrapper_cmd, check=True)
+                    
+                    chmod_wrapper_cmd = f"ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'chmod +x {temp_wrapper}'"
+                    self.run_command(chmod_wrapper_cmd, check=True)
+                    
+                    # Run the setup script on the worker node with password handling
+                    print(f"Running setup on {worker_ip} (this may take several minutes)...")
+                    
+                    # Use sshpass to handle interactive sudo prompts
+                    setup_cmd = f"sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'bash {temp_wrapper} 2>&1'"
+                    
+                    # Run with real-time output
+                    process = subprocess.Popen(
+                        setup_cmd,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1
+                    )
+                    
+                    # Print output in real-time
+                    if process.stdout:
+                        for line in process.stdout:
+                            print(f"  [{worker_ip}] {line.rstrip()}")
+                    
+                    process.wait()
+                    
+                    if process.returncode == 0:
+                        print(f"\n✓ Successfully set up worker node: {worker_ip}")
+                        success = True
+                    else:
+                        print(f"\n✗ Failed to set up worker node: {worker_ip} (exit code: {process.returncode})")
+                        success = False
+                    
+                    # Cleanup temporary files on worker node
+                    cleanup_cmd = f"ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'rm -f {temp_config} {temp_script} {temp_wrapper} /tmp/askpass_*.sh'"
+                    self.run_command(cleanup_cmd, check=False)
+                    
+                    return success
+                    
+                finally:
+                    # Cleanup local wrapper script
+                    os.unlink(local_wrapper_path)
+                    
+            finally:
+                # Cleanup local password file
+                os.unlink(temp_pass_path)
+            
+        except Exception as e:
+            print(f"\n✗ Error setting up worker node {worker_ip}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def setup_all_workers(self, config_file: str):
+        """Automatically setup all worker nodes via SSH"""
+        if not self.password:
+            print("\nSkipping automatic worker setup (no password provided)")
+            return False
+        
+        if not self.worker_ips:
+            print("\nNo worker nodes to setup")
+            return True
+        
+        print(f"\n{'=' * 60}")
+        print("AUTOMATIC WORKER NODE SETUP")
+        print(f"{'=' * 60}")
+        print(f"Will setup {len(self.worker_ips)} worker node(s)")
+        print(f"Worker IPs: {', '.join(self.worker_ips)}")
+        
+        response = input("\nProceed with automatic worker setup? (y/N): ")
+        if response.lower() != 'y':
+            print("Automatic worker setup cancelled")
+            return False
+        
+        success_count = 0
+        failed_nodes = []
+        
+        for worker_ip in self.worker_ips:
+            if self._setup_worker_node(worker_ip, config_file):
+                success_count += 1
+            else:
+                failed_nodes.append(worker_ip)
+        
+        print(f"\n{'=' * 60}")
+        print("WORKER SETUP SUMMARY")
+        print(f"{'=' * 60}")
+        print(f"Total workers: {len(self.worker_ips)}")
+        print(f"Successfully set up: {success_count}")
+        print(f"Failed: {len(failed_nodes)}")
+        
+        if failed_nodes:
+            print(f"\nFailed nodes: {', '.join(failed_nodes)}")
+            print("You may need to setup these nodes manually")
+        
+        return len(failed_nodes) == 0
     
     def configure_hosts_file(self):
         """Configure /etc/hosts with cluster node information"""
@@ -181,7 +491,7 @@ class ClusterSetup:
         print(hosts_content)
         
         # Backup existing hosts file
-        self.run_command("sudo cp /etc/hosts /etc/hosts.backup", check=False)
+        self.run_sudo_command("cp /etc/hosts /etc/hosts.backup", check=False)
         
         # Check if entries already exist
         with open('/etc/hosts', 'r') as f:
@@ -192,7 +502,7 @@ class ClusterSetup:
             with open('/tmp/hosts_append', 'w') as f:
                 f.write(hosts_content)
             
-            self.run_command("sudo bash -c 'cat /tmp/hosts_append >> /etc/hosts'")
+            self.run_sudo_command("bash -c 'cat /tmp/hosts_append >> /etc/hosts'")
             print("/etc/hosts updated successfully")
         else:
             print("/etc/hosts already contains cluster node entries")
@@ -215,8 +525,8 @@ class ClusterSetup:
         
         if result.returncode != 0:
             print("Note: Slurm might not be available in Homebrew. Installing from apt...")
-            self.run_command("sudo apt-get update")
-            self.run_command("sudo apt-get install -y slurm-wlm slurm-wlm-doc")
+            self.run_sudo_command("apt-get update")
+            self.run_sudo_command("apt-get install -y slurm-wlm slurm-wlm-doc")
         
         print("Slurm installation completed")
     
@@ -235,8 +545,8 @@ class ClusterSetup:
         
         if result.returncode != 0:
             print("Installing OpenMPI from apt as fallback...")
-            self.run_command("sudo apt-get update")
-            self.run_command("sudo apt-get install -y openmpi-bin openmpi-common libopenmpi-dev")
+            self.run_sudo_command("apt-get update")
+            self.run_sudo_command("apt-get install -y openmpi-bin openmpi-common libopenmpi-dev")
         
         print("OpenMPI installation completed")
     
@@ -254,8 +564,8 @@ class ClusterSetup:
         ]
         
         for dir_path in slurm_dirs:
-            self.run_command(f"sudo mkdir -p {dir_path}")
-            self.run_command(f"sudo chown -R {self.username}:{self.username} {dir_path}", check=False)
+            self.run_sudo_command(f"mkdir -p {dir_path}")
+            self.run_sudo_command(f"chown -R {self.username}:{self.username} {dir_path}", check=False)
         
         # Generate slurm.conf
         slurm_conf = self.generate_slurm_conf()
@@ -263,24 +573,24 @@ class ClusterSetup:
         with open('/tmp/slurm.conf', 'w') as f:
             f.write(slurm_conf)
         
-        self.run_command("sudo cp /tmp/slurm.conf /etc/slurm/slurm.conf")
+        self.run_sudo_command("cp /tmp/slurm.conf /etc/slurm/slurm.conf")
         
         # Generate cgroup.conf
         cgroup_conf = """CgroupAutomount=yes\nConstrainCores=yes\nConstrainRAMSpace=yes\n"""
         with open('/tmp/cgroup.conf', 'w') as f:
             f.write(cgroup_conf)
         
-        self.run_command("sudo cp /tmp/cgroup.conf /etc/slurm/cgroup.conf")
+        self.run_sudo_command("cp /tmp/cgroup.conf /etc/slurm/cgroup.conf")
         
         print("Slurm configuration files created")
         
         # Start Slurm services
         if self.is_master:
             print("Starting Slurm controller (slurmctld)...")
-            self.run_command("sudo slurmctld", check=False)
+            self.run_sudo_command("slurmctld", check=False)
         
         print("Starting Slurm daemon (slurmd)...")
-        self.run_command("sudo slurmd", check=False)
+        self.run_sudo_command("slurmd", check=False)
         
         print("Slurm configured successfully")
     
@@ -297,17 +607,52 @@ class ClusterSetup:
             cpus = "4"
             memory = "8000"
         
-        conf = f"""# slurm.conf - Slurm configuration file\nClusterName=cluster\nSlurmctldHost=master({self.master_ip})\n\n# Scheduling\nSchedulerType=sched/backfill\nSelectType=select/cons_tres\nSelectTypeParameters=CR_Core\n\n# Logging\nSlurmctldDebug=info\nSlurmctldLogFile=/var/log/slurm/slurmctld.log\nSlurmdDebug=info\nSlurmdLogFile=/var/log/slurm/slurmd.log\n\n# State preservation\nStateSaveLocation=/var/spool/slurm/ctld\nSlurmdSpoolDir=/var/spool/slurm/d\n\n# Process tracking\nProctrackType=proctrack/linuxproc\nTaskPlugin=task/affinity,task/cgroup\n\n# MPI\nMpiDefault=pmix\n\n# Timeouts\nSlurmctldTimeout=300\nSlurmdTimeout=300\nInactiveLimit=0\nMinJobAge=300\nKillWait=30\nWaittime=0\n\n# Nodes\n"""
+        conf = f"""# slurm.conf - Slurm configuration file
+ClusterName=cluster
+SlurmctldHost=master({self.master_ip})
+
+# Scheduling
+SchedulerType=sched/backfill
+SelectType=select/cons_tres
+SelectTypeParameters=CR_Core
+
+# Logging
+SlurmctldDebug=info
+SlurmctldLogFile=/var/log/slurm/slurmctld.log
+SlurmdDebug=info
+SlurmdLogFile=/var/log/slurm/slurmd.log
+
+# State preservation
+StateSaveLocation=/var/spool/slurm/ctld
+SlurmdSpoolDir=/var/spool/slurm/d
+
+# Process tracking
+ProctrackType=proctrack/linuxproc
+TaskPlugin=task/affinity,task/cgroup
+
+# MPI
+MpiDefault=pmix
+
+# Timeouts
+SlurmctldTimeout=300
+SlurmdTimeout=300
+InactiveLimit=0
+MinJobAge=300
+KillWait=30
+Waittime=0
+
+# Nodes
+"""
         # Add master node
-        conf += f"NodeName=master CPUs={{cpus}} RealMemory={{memory}} State=UNKNOWN\n"
-        
+        conf += f"NodeName=master CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
+
         # Add worker nodes
         for idx, worker_ip in enumerate(self.worker_ips, start=1):
-            conf += f"NodeName=worker{{idx}} CPUs={{cpus}} RealMemory={{memory}} State=UNKNOWN\n"
-        
+            conf += f"NodeName=worker{idx} CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
+
         # Add partition
-        all_nodes = "master," + ",".join([f"worker{{i+1}}" for i in range(len(self.worker_ips))])
-        conf += f"\n# Partitions\nPartitionName=all Nodes={{all_nodes}} Default=YES MaxTime=INFINITE State=UP\n"
+        all_nodes = "master," + ",".join([f"worker{i+1}" for i in range(len(self.worker_ips))])
+        conf += f"\n# Partitions\nPartitionName=all Nodes={all_nodes} Default=YES MaxTime=INFINITE State=UP\n"
         
         return conf
     
@@ -353,20 +698,25 @@ class ClusterSetup:
         for name, command in checks:
             result = self.run_command(command, check=False)
             if result.returncode == 0:
-                print(f"✓ {{name}}: OK")
+                print(f"✓ {name}: OK")
             else:
-                print(f"✗ {{name}}: NOT FOUND or ERROR")
+                print(f"✗ {name}: NOT FOUND or ERROR")
         
         print("\nVerification completed")
     
-    def run_full_setup(self):
+    def run_full_setup(self, config_file: Optional[str] = None):
         """Run the complete cluster setup"""
         print("=" * 60)
         print("CLUSTER SETUP SCRIPT")
         print("=" * 60)
-        print(f"Master Node: {{self.master_ip}}")
-        print(f"Worker Nodes: {{', '.join(self.worker_ips)}}")
-        print(f"Current node is: {{'MASTER' if self.is_master else 'WORKER'}}")
+        print(f"Master Node: {self.master_ip}")
+        print(f"Worker Nodes: {', '.join(self.worker_ips)}")
+        print(f"Current node is: {'MASTER' if self.is_master else 'WORKER'}")
+        if not self.is_master:
+            print("\n⚠️  WARNING: This script is NOT running on the master node!")
+            print(f"⚠️  To automatically set up all workers, please run this script")
+            print(f"⚠️  from the master node at IP: {self.master_ip}")
+            print()
         print("=" * 60)
         
         # Check sudo access
@@ -379,7 +729,7 @@ class ClusterSetup:
                 return
         
         try:
-            # Setup steps
+            # Setup steps for current node
             self.install_homebrew()
             self.setup_ssh()
             self.configure_passwordless_ssh()
@@ -391,18 +741,58 @@ class ClusterSetup:
             self.verify_installation()
             
             print("\n" + "=" * 60)
-            print("CLUSTER SETUP COMPLETED SUCCESSFULLY")
+            print("LOCAL NODE SETUP COMPLETED SUCCESSFULLY")
             print("=" * 60)
-            print("\nNext steps:")
-            print("1. Ensure passwordless SSH is configured between all nodes")
-            print("2. Copy the public key to all worker nodes")
-            print("3. Run this script on all worker nodes")
-            print("4. Test Slurm with: sinfo")
-            print("5. Test OpenMPI with: mpirun -np 2 hostname")
+            
+            # If this is the master node and we have a password, offer to setup workers
+            workers_setup_success = False
+            if self.is_master and self.password and config_file and self.worker_ips:
+                workers_setup_success = self.setup_all_workers(config_file)
+            
+            # Final summary
+            print("\n" + "=" * 60)
+            print("CLUSTER SETUP SUMMARY")
+            print("=" * 60)
+            
+            if self.is_master:
+                if workers_setup_success:
+                    print("✓ Master node setup completed")
+                    print("✓ All worker nodes setup completed automatically")
+                    print("\nYour cluster is ready!")
+                    print("\nNext steps:")
+                    print("1. Test Slurm with: sinfo")
+                    print("2. Test OpenMPI with: mpirun -np 2 hostname")
+                elif self.password and config_file and self.worker_ips:
+                    print("✓ Master node setup completed")
+                    print("⚠ Some worker nodes failed automatic setup")
+                    print("\nNext steps:")
+                    print("1. Manually setup failed worker nodes")
+                    print("2. Test Slurm with: sinfo")
+                    print("3. Test OpenMPI with: mpirun -np 2 hostname")
+                elif self.password:
+                    print("✓ Master node setup completed")
+                    print("✓ SSH keys copied to worker nodes")
+                    print("\nNext steps:")
+                    print("1. Run this script on each worker node:")
+                    print(f"   python cluster_setup.py --config <config_file>")
+                    print("2. Test Slurm with: sinfo")
+                    print("3. Test OpenMPI with: mpirun -np 2 hostname")
+                else:
+                    print("✓ Master node setup completed")
+                    print("\nNext steps:")
+                    print("1. Copy SSH keys to worker nodes manually, or")
+                    print("   Re-run with --password flag for automatic setup")
+                    print("2. Run this script on each worker node")
+                    print("3. Test Slurm with: sinfo")
+                    print("4. Test OpenMPI with: mpirun -np 2 hostname")
+            else:
+                print("✓ Worker node setup completed")
+                print("\nThis worker is now part of the cluster")
+            
             print("=" * 60)
             
         except Exception as e:
-            print(f"\n\nERROR during setup: {{e}}")
+            print(f"\n\nERROR during setup: {e}")
             import traceback
             traceback.print_exc()
             sys.exit(1)
@@ -420,42 +810,38 @@ def load_yaml_config(path: str) -> Dict:
 def main():
     """Main entry point for the cluster setup script"""
     parser = argparse.ArgumentParser(
-        description="Cluster Setup Script for Slurm and OpenMPI on Ubuntu/WSL"
+        description="Cluster Setup Script for Slurm and OpenMPI on Ubuntu/WSL",
+        epilog="Example: python cluster_setup.py --config cluster_config.yaml --password"
     )
     parser.add_argument(
         '--config', '-c',
-        help='Path to YAML config file containing master/workers/username',
-        default=None
+        required=True,
+        help='Path to YAML config file containing master/workers/username (required)'
     )
     parser.add_argument(
-        '--master',
-        help='IPv4 address of the master node (overrides config file)'
-    )
-    parser.add_argument(
-        '--workers',
-        nargs='+',
-        help='IPv4 addresses of worker nodes (space-separated; overrides config file)'
-    )
-    parser.add_argument(
-        '--username',
-        default=None,
-        help='Username for cluster operations (default: current user)'
+        '--password', '-p',
+        action='store_true',
+        help='Prompt for password to automatically setup entire cluster (copies SSH keys and runs setup on all workers)'
     )
     
     args = parser.parse_args()
     
-    config = {}
-    if args.config:
-        try:
-            config = load_yaml_config(args.config)
-        except Exception as e:
-            print(f"Error loading config file {{args.config}}: {{e}}")
-            sys.exit(1)
+    # Get password if flag is set
+    password = None
+    if args.password:
+        password = getpass.getpass("Enter password for worker nodes: ")
     
-    # Merge CLI args over YAML config (CLI overrides YAML)
-    master = args.master or config.get('master')
-    workers = args.workers or config.get('workers')
-    username = args.username or config.get('username')
+    # Load YAML config
+    try:
+        config = load_yaml_config(args.config)
+    except Exception as e:
+        print(f"Error loading config file {args.config}: {e}")
+        sys.exit(1)
+    
+    # Extract configuration
+    master = config.get('master')
+    workers = config.get('workers')
+    username = config.get('username')
     
     # Normalize workers if provided as string in YAML
     if isinstance(workers, str):
@@ -463,8 +849,13 @@ def main():
     
     # Validate presence
     if not master or not workers:
-        print("Error: master and workers must be provided either via CLI or --config YAML file.")
-        parser.print_help()
+        print("Error: Config file must contain 'master' and 'workers' fields.")
+        print("\nExpected YAML format:")
+        print("  master: 192.168.1.100")
+        print("  workers:")
+        print("    - 192.168.1.101")
+        print("    - 192.168.1.102")
+        print("  username: myuser  # optional")
         sys.exit(1)
     
     # Validate IP addresses
@@ -472,26 +863,26 @@ def main():
         # Allow localhost and 127.0.0.1
         if ip in ['localhost', '127.0.0.1']:
             return True
-        parts = ip.split('.');
+        parts = ip.split('.')
         if len(parts) != 4:
-            return False;
+            return False
         try:
             return all(part and part.isdigit() and 0 <= int(part) <= 255 for part in parts)
         except (ValueError, AttributeError):
             return False
-    
+
     if not is_valid_ip(master):
-        print(f"Error: Invalid master IP address: {{master}}")
+        print(f"Error: Invalid master IP address: {master}")
         sys.exit(1)
-    
+
     for worker_ip in workers:
         if not is_valid_ip(worker_ip):
-            print(f"Error: Invalid worker IP address: {{worker_ip}}")
+            print(f"Error: Invalid worker IP address: {worker_ip}")
             sys.exit(1)
     
     # Create and run setup
-    setup = ClusterSetup(master, workers, username)
-    setup.run_full_setup()
+    setup = ClusterSetup(master, workers, username, password)
+    setup.run_full_setup(config_file=args.config)
 
 
 if __name__ == '__main__':
