@@ -449,6 +449,11 @@ sinfo
 
 **Root Cause**: OpenMPI 5.x uses PRRTE (prted) for process management, which requires bidirectional network communication between nodes. WSL and some network configurations may block the required ports or protocols.
 
+**Configuration Issue Fixed**: The script originally hardcoded `btl_tcp_if_include = eth0`, but:
+- eth0 is often DOWN on many systems
+- The actual cluster network is typically on eth1 or other interfaces
+- **Solution**: Script now auto-detects the correct network interface and uses IP ranges (e.g., `192.168.1.0/24`) instead of interface names for better reliability
+
 **Workaround - Use pdsh for Parallel Execution**:
 
 ```bash

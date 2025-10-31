@@ -791,7 +791,38 @@ Waittime=0
         conf += f"\n# Partitions\nPartitionName=all Nodes={all_nodes} Default=YES MaxTime=INFINITE State=UP\n"
 
         return conf
-    
+
+    def _detect_mpi_network_config(self) -> str:
+        """
+        Auto-detect the correct network configuration for OpenMPI.
+        Returns an MCA parameter configuration string.
+        """
+        try:
+            # Try to find which interface has the master_ip
+            result = self.run_command("ip -o -4 addr show", check=False)
+            if result.returncode == 0:
+                import re
+                # Parse output looking for master_ip
+                for line in result.stdout.strip().split('\n'):
+                    # Format: "2: eth1    inet 192.168.1.147/24 ..."
+                    match = re.search(r'\d+:\s+(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)', line)
+                    if match:
+                        iface, ip = match.groups()
+                        if ip == self.master_ip or ip in self.all_ips:
+                            # Found the interface with cluster IP
+                            # Extract network range (e.g., 192.168.1.0/24)
+                            # Use IP range instead of interface name for better reliability
+                            ip_parts = ip.split('.')
+                            network_range = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.0/24"
+                            print(f"DEBUG: Detected MPI network: {network_range} on interface {iface}")
+                            return f"btl_tcp_if_include = {network_range}"
+        except Exception as e:
+            print(f"DEBUG: Could not auto-detect network: {e}")
+
+        # Fallback: use eth1 (common in many setups)
+        print("DEBUG: Using fallback network configuration (eth1)")
+        return "btl_tcp_if_include = eth1"
+
     def configure_openmpi(self):
         """Configure OpenMPI for the cluster"""
         print("\n=== Configuring OpenMPI ===")
@@ -810,13 +841,21 @@ Waittime=0
         
         print(f"OpenMPI hostfile created at {hostfile_path}")
         print(f"Content:\n{hostfile_content}")
-        
+
+        # Auto-detect network interface or use IP range
+        # Try to find the network interface that has the master_ip
+        network_config = self._detect_mpi_network_config()
+
         # Create default MCA parameters file
-        mca_params = """# OpenMPI MCA parameters\nbtl = ^openib\nbtl_tcp_if_include = eth0\n"""
+        mca_params = f"""# OpenMPI MCA parameters
+btl = ^openib
+{network_config}
+"""
         mca_file = Path.home() / ".openmpi" / "mca-params.conf"
         with open(mca_file, 'w') as f:
             f.write(mca_params)
-        
+
+        print(f"OpenMPI MCA parameters configured: {network_config}")
         print("OpenMPI configured successfully")
     
     def verify_installation(self):
