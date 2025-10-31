@@ -2,7 +2,14 @@
 # This script must be run as Administrator in PowerShell on Windows
 
 # Get WSL IP address
-$wslIP = (wsl hostname -I).Trim()
+try {
+    $wslIP = (wsl hostname -I 2>$null).Trim()
+    if ([string]::IsNullOrWhiteSpace($wslIP)) {
+        $wslIP = "Not detected (WSL may not be running)"
+    }
+} catch {
+    $wslIP = "Not detected"
+}
 Write-Host "WSL IP Address: $wslIP"
 
 # Define port ranges for OpenMPI
