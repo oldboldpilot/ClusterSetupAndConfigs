@@ -82,6 +82,9 @@ You'll be prompted to enter the password for worker nodes. The script will:
 4. Install Slurm and OpenMPI on master
 5. Configure Slurm and OpenMPI on master
 6. **Automatically SSH to each worker and run the same setup remotely**
+   - Worker nodes run in non-interactive mode (no prompts)
+   - Password is securely piped via temporary files
+   - Real-time output shows progress on each worker
 7. Verify installations
 
 #### Option B: Terminal UI
@@ -117,15 +120,16 @@ When run from master, the script automatically:
 
 1. Copies the setup script and config to each worker
 2. Creates a wrapper script for sudo password handling
-3. SSHs to the worker and executes the full setup remotely
-4. Monitors progress and reports any errors
+3. SSHs to the worker and executes the full setup remotely in non-interactive mode
+4. Monitors progress and reports any errors in real-time
 
 Each worker receives:
 - Homebrew installation
-- SSH configuration
+- SSH configuration (with `--non-interactive` flag to skip prompts)
 - Slurm worker configuration
 - OpenMPI configuration
 - Hosts file updates
+- Automatic confirmation of sudo access requirements
 
 ## Completion Indicators
 

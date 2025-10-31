@@ -210,7 +210,10 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument('--config', '-c', required=True, help='...')
 parser.add_argument('--password', '-p', action='store_true', help='...')
+parser.add_argument('--non-interactive', action='store_true', help='Skip confirmation prompts')
 ```
+
+**Note**: The `--non-interactive` flag is used internally when running on worker nodes to avoid prompting for user input during automated setup.
 
 ## Subprocess Execution Pattern
 

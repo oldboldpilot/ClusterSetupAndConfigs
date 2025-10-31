@@ -359,12 +359,18 @@ echo '{self.password}'
 ASKPASS_EOF
 chmod +x $SUDO_ASKPASS
 
+# Create a temporary file with the password for the script
+PASSWORD_FILE=/tmp/password_{os.getpid()}.txt
+echo '{self.password}' > $PASSWORD_FILE
+
 # Run the setup script with sudo -A (use askpass)
+# Use --non-interactive flag to skip confirmation prompts
+# Pipe password to avoid password prompt
 export SUDO_ASKPASS
-python3 {temp_script} --config {temp_config}
+python3 {temp_script} --config {temp_config} --password --non-interactive < $PASSWORD_FILE
 
 # Cleanup
-rm -f $SUDO_ASKPASS
+rm -f $SUDO_ASKPASS $PASSWORD_FILE
 """
                 
                 temp_wrapper = f"/tmp/wrapper_{os.getpid()}.sh"
@@ -704,7 +710,7 @@ Waittime=0
         
         print("\nVerification completed")
     
-    def run_full_setup(self, config_file: Optional[str] = None):
+    def run_full_setup(self, config_file: Optional[str] = None, non_interactive: bool = False):
         """Run the complete cluster setup"""
         print("=" * 60)
         print("CLUSTER SETUP SCRIPT")
@@ -723,10 +729,13 @@ Waittime=0
         if not self.check_sudo_access():
             print("\nWARNING: This script requires sudo access.")
             print("Please run with sudo or ensure passwordless sudo is configured.")
-            response = input("Continue anyway? (y/N): ")
-            if response.lower() != 'y':
-                print("Setup cancelled")
-                return
+            if not non_interactive:
+                response = input("Continue anyway? (y/N): ")
+                if response.lower() != 'y':
+                    print("Setup cancelled")
+                    return
+            else:
+                print("Running in non-interactive mode, continuing...")
         
         try:
             # Setup steps for current node
@@ -823,6 +832,11 @@ def main():
         action='store_true',
         help='Prompt for password to automatically setup entire cluster (copies SSH keys and runs setup on all workers)'
     )
+    parser.add_argument(
+        '--non-interactive',
+        action='store_true',
+        help='Run in non-interactive mode (skip confirmation prompts)'
+    )
     
     args = parser.parse_args()
     
@@ -882,7 +896,7 @@ def main():
     
     # Create and run setup
     setup = ClusterSetup(master, workers, username, password)
-    setup.run_full_setup(config_file=args.config)
+    setup.run_full_setup(config_file=args.config, non_interactive=args.non_interactive)
 
 
 if __name__ == '__main__':

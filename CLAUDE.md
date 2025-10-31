@@ -252,8 +252,17 @@ username: "myuser"  # optional, defaults to current user
 ### cluster_setup.py
 Main command-line tool for cluster setup. Usage:
 ```bash
+# Interactive mode (prompts for confirmation)
 uv run python cluster_setup.py --config cluster_config.yaml --password
+
+# Non-interactive mode (auto-confirms, used internally for worker setup)
+uv run python cluster_setup.py --config cluster_config.yaml --password --non-interactive
 ```
+
+Command-line flags:
+- `--config, -c`: YAML configuration file (required)
+- `--password, -p`: Prompt for password and enable automatic worker setup
+- `--non-interactive`: Skip confirmation prompts (automatically used on workers)
 
 ### cluster_setup_ui.py
 Interactive terminal UI. Usage:

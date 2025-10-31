@@ -214,11 +214,14 @@ python cluster_setup.py --config cluster_config.yaml
 python cluster_setup.py --help
 
 # Required:
---config, -c    Path to YAML configuration file
+--config, -c           Path to YAML configuration file
 
 # Optional:
---password, -p  Prompt for password to automatically setup the entire cluster
-                (copies SSH keys + runs setup on all worker nodes remotely)
+--password, -p         Prompt for password to automatically setup the entire cluster
+                       (copies SSH keys + runs setup on all worker nodes remotely)
+
+--non-interactive      Run in non-interactive mode (skip confirmation prompts)
+                       Automatically used for worker nodes during remote setup
 ```
 
 ### Complete Example
