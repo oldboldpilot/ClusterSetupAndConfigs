@@ -376,13 +376,47 @@ brew uninstall open-mpi
 brew install open-mpi@4
 ```
 
-#### WSL-Specific Issues
+#### WSL-Specific Issues and SOLUTION
 
-Known limitations with OpenMPI + PRRTE on WSL:
-- Windows port forwarding to WSL only covers port 22 (SSH)
-- Dynamic MPI ports (50000-50200) are not automatically forwarded
-- This causes PRRTE daemon communication to hang
-- Best workarounds: Use Slurm's srun or pdsh instead of mpirun
+**Problem**: Windows port forwarding to WSL only covers port 22 (SSH), not MPI ports (50000-50200), causing PRRTE daemon communication to hang.
+
+**SOLUTION - Windows Firewall Configuration**:
+
+We provide PowerShell scripts to fix this issue:
+
+**Step 1: Configure Windows Firewall** (Recommended, persists across reboots):
+```powershell
+# Open PowerShell as Administrator on Windows
+cd Z:\PycharmProjects\ClusterSetupAndConfigs
+.\configure_wsl_firewall.ps1
+```
+
+This creates Windows Firewall rules allowing inbound/outbound traffic on ports 50000-50200.
+
+**Step 2 (Optional): Setup Port Forwarding** (Only if external access needed):
+```powershell
+# For external machines to access WSL cluster
+.\setup_wsl_port_forwarding.ps1
+
+# To remove port forwarding
+.\setup_wsl_port_forwarding.ps1 -Remove
+```
+
+**Important Notes**:
+- Firewall rules persist across reboots
+- Port forwarding rules are cleared on Windows restart
+- If WSL IP changes, re-run the port forwarding script
+- The cluster setup script will automatically detect WSL and display these instructions
+
+**After running the PowerShell scripts**, test MPI:
+```bash
+# In WSL, test cross-cluster MPI
+mpirun -np 6 --hostfile ~/.openmpi/hostfile hostname
+```
+
+**Alternative workarounds** (if PowerShell solution not available):
+- Use Slurm's srun (best for MPI programs)
+- Use pdsh (best for embarrassingly parallel tasks)
 
 ## Advanced Usage
 

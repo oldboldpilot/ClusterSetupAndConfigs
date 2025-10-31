@@ -465,13 +465,29 @@ The script now configures the following ports in `~/.openmpi/mca-params.conf`:
 - **OOB TCP port range**: 50100-50200 (`oob_tcp_port_range = 50100-50200`)
 
 **Firewall Configuration**:
-If you have a firewall enabled (ufw, iptables, Windows Firewall), you must allow these ports:
+
+For **Linux/Ubuntu** with ufw:
 ```bash
-# On Ubuntu/WSL with ufw (if enabled)
+# If ufw is enabled
 sudo ufw allow 50000:50200/tcp comment 'OpenMPI PRRTE'
 ```
 
-For WSL specifically, Windows Firewall may also need configuration to allow these ports.
+For **WSL** - **SOLUTION PROVIDED**:
+
+Windows Firewall blocks MPI ports by default. We provide PowerShell scripts to fix this:
+
+```powershell
+# Open PowerShell as Administrator on Windows, navigate to project directory
+cd Z:\PycharmProjects\ClusterSetupAndConfigs
+
+# Step 1: Configure Windows Firewall (required, persists across reboots)
+.\configure_wsl_firewall.ps1
+
+# Step 2: Setup port forwarding (optional, only if external access needed)
+.\setup_wsl_port_forwarding.ps1
+```
+
+The cluster setup script automatically detects WSL and displays these instructions.
 
 **Network Interface Configuration Fixed**: The script originally hardcoded `btl_tcp_if_include = eth0`, but:
 - eth0 is often DOWN on many systems

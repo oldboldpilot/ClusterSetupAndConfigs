@@ -54,15 +54,23 @@ class ClusterSetup:
         # Get master hostname - will be used for slurm.conf generation
         self.master_hostname = self._get_master_hostname()
         
+    def _is_wsl(self) -> bool:
+        """Detect if running on WSL"""
+        try:
+            with open('/proc/version', 'r') as f:
+                return 'microsoft' in f.read().lower() or 'wsl' in f.read().lower()
+        except:
+            return False
+
     def _is_current_node_master(self) -> bool:
         """Check if current node is the master node"""
         try:
             hostname = socket.gethostname()
             local_ip = socket.gethostbyname(hostname)
-            
+
             # Debug output
             print(f"DEBUG: hostname='{hostname}', local_ip='{local_ip}', master_ip='{self.master_ip}'")
-            
+
             # Check if master_ip is localhost
             if self.master_ip in ['localhost', '127.0.0.1']:
                 return True
@@ -890,8 +898,28 @@ oob_tcp_port_range = 50100-50200
                 print(f"✓ {name}: OK")
             else:
                 print(f"✗ {name}: NOT FOUND or ERROR")
-        
+
         print("\nVerification completed")
+
+        # WSL-specific warning for MPI
+        if self._is_wsl():
+            print("\n" + "="*60)
+            print("⚠️  WSL DETECTED - Important MPI Configuration Note")
+            print("="*60)
+            print("Cross-cluster mpirun may hang due to Windows port forwarding.")
+            print("Windows only forwards SSH (port 22), not MPI ports (50000-50200).")
+            print()
+            print("To fix this, run in PowerShell as Administrator on Windows:")
+            print("  cd", str(Path.cwd()))
+            print("  .\\configure_wsl_firewall.ps1")
+            print()
+            print("For full port forwarding (if needed):")
+            print("  .\\setup_wsl_port_forwarding.ps1")
+            print()
+            print("Alternative: Use pdsh for parallel execution (no port issues):")
+            print("  brew install pdsh")
+            print("  pdsh -w 192.168.1.[147,137,96] hostname")
+            print("="*60)
     
     def run_full_setup(self, config_file: Optional[str] = None, non_interactive: bool = False):
         """Run the complete cluster setup"""
