@@ -1,0 +1,8 @@
+# GitHub Repository Default Branch Configuration
+
+**ACTION REQUIRED:** Change the default branch from 'main' to 'master'
+
+This can be done in:
+GitHub Settings → Branches → Default branch → Switch to 'master'
+
+See DEFAULT_BRANCH_INSTRUCTIONS.md for detailed instructions.
