@@ -192,6 +192,14 @@ Improved security for sudo operations:
 - Password never appears in process list or error messages
 - Supports both local and remote sudo execution via wrapper scripts
 
+### Slurm Configuration Fixes (Latest)
+Fixed issues with Slurm 24.11+ compatibility:
+- **Removed deprecated CgroupAutomount**: No longer included in cgroup.conf (causes startup failures in 24.11+)
+- **Automatic hostname detection**: Uses actual system hostname instead of hardcoded "master" in slurm.conf
+- **Proper directory ownership**: Sets Slurm directories to `slurm:slurm` user/group (required by daemons)
+- **Systemctl integration**: Uses `systemctl restart` instead of calling daemons directly
+- **Service enablement**: Ensures services start automatically on boot
+
 ### Troubleshooting Node Detection
 If script shows "Current node is: WORKER" when you expected MASTER:
 ```bash

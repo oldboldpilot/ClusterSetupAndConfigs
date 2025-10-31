@@ -51,6 +51,8 @@ class ClusterSetup:
         self.username = username or os.getenv('USER', 'ubuntu')
         self.password = password
         self.is_master = self._is_current_node_master()
+        # Get master hostname - will be used for slurm.conf generation
+        self.master_hostname = self._get_master_hostname()
         
     def _is_current_node_master(self) -> bool:
         """Check if current node is the master node"""
@@ -88,7 +90,32 @@ class ClusterSetup:
         except Exception as e:
             print(f"DEBUG: Error detecting node role: {e}")
             return False
-    
+
+    def _get_master_hostname(self) -> str:
+        """Get the master node's hostname for consistent slurm.conf across all nodes"""
+        try:
+            if self.is_master:
+                # We're on the master, get local hostname
+                hostname_result = subprocess.run(['hostname'], capture_output=True, text=True, check=False)
+                if hostname_result.returncode == 0:
+                    return hostname_result.stdout.strip()
+            else:
+                # We're on a worker, need to get master's hostname via SSH
+                # This will be called during worker setup when password is available
+                if self.password:
+                    import shlex
+                    # Use sshpass to SSH to master and get hostname
+                    ssh_cmd = ['sshpass', '-p', self.password, 'ssh', '-o', 'StrictHostKeyChecking=no',
+                               f'{self.username}@{self.master_ip}', 'hostname']
+                    result = subprocess.run(ssh_cmd, capture_output=True, text=True, check=False)
+                    if result.returncode == 0:
+                        return result.stdout.strip()
+        except Exception as e:
+            print(f"DEBUG: Could not determine master hostname: {e}")
+
+        # Fallback to "master" if we can't determine actual hostname
+        return "master"
+
     def run_command(self, command: str, check: bool = True, shell: bool = True) -> subprocess.CompletedProcess:
         """Run a shell command and return the result"""
         result = subprocess.run(
@@ -135,8 +162,13 @@ class ClusterSetup:
             
             return result
         else:
-            # Try without password (may prompt user)
-            return self.run_command(f"sudo {command}", check=check)
+            # Check if SUDO_ASKPASS is set in environment
+            if 'SUDO_ASKPASS' in os.environ and os.path.exists(os.environ['SUDO_ASKPASS']):
+                # Use sudo -A to read password from SUDO_ASKPASS
+                return self.run_command(f"sudo -A {command}", check=check)
+            else:
+                # Try without password (may prompt user)
+                return self.run_command(f"sudo {command}", check=check)
     
     def check_sudo_access(self) -> bool:
         """Check if user has sudo access"""
@@ -178,6 +210,112 @@ class ClusterSetup:
                 f.write(f'eval "$({homebrew_path}/brew shellenv)"\n')
         
         print("Homebrew installed successfully")
+    
+    def configure_system_path(self):
+        """Configure system-wide PATH for Homebrew binaries (OpenMPI, Slurm, etc.)"""
+        print("\n=== Configuring System-Wide PATH ===")
+        
+        homebrew_path = "/home/linuxbrew/.linuxbrew/bin"
+        homebrew_sbin = "/home/linuxbrew/.linuxbrew/sbin"
+        
+        if not os.path.exists(homebrew_path):
+            print("Warning: Homebrew path not found, skipping PATH configuration")
+            return
+        
+        # Configure /etc/environment for system-wide PATH
+        # This ensures PATH is available in non-login shells (like SSH remote commands)
+        print("Updating /etc/environment...")
+        try:
+            # Read current /etc/environment
+            env_file = Path("/etc/environment")
+            if env_file.exists():
+                with open(env_file, 'r') as f:
+                    content = f.read()
+            else:
+                content = ""
+            
+            # Check if Homebrew paths are already in /etc/environment
+            if homebrew_path not in content:
+                # Parse existing PATH or create new one
+                import re
+                path_match = re.search(r'PATH="([^"]*)"', content)
+                
+                if path_match:
+                    existing_path = path_match.group(1)
+                    new_path = f"{homebrew_path}:{homebrew_sbin}:{existing_path}"
+                    new_content = re.sub(
+                        r'PATH="[^"]*"',
+                        f'PATH="{new_path}"',
+                        content
+                    )
+                else:
+                    # No PATH line exists, add one
+                    new_path = f"{homebrew_path}:{homebrew_sbin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                    new_content = content.rstrip() + f'\nPATH="{new_path}"\n'
+                
+                # Write updated content
+                temp_file = Path("/tmp/environment.tmp")
+                with open(temp_file, 'w') as f:
+                    f.write(new_content)
+                
+                self.run_sudo_command(f"cp {temp_file} /etc/environment")
+                temp_file.unlink()
+                print("✓ Updated /etc/environment with Homebrew paths")
+            else:
+                print("✓ Homebrew paths already in /etc/environment")
+        
+        except Exception as e:
+            print(f"Warning: Could not update /etc/environment: {e}")
+        
+        # Also configure SSH to preserve environment
+        print("Configuring SSH to accept environment variables...")
+        try:
+            sshd_config = Path("/etc/ssh/sshd_config")
+            if sshd_config.exists():
+                with open(sshd_config, 'r') as f:
+                    sshd_content = f.read()
+                
+                # Check if PermitUserEnvironment is already enabled
+                if "PermitUserEnvironment yes" not in sshd_content:
+                    # Add configuration
+                    temp_file = Path("/tmp/sshd_config.tmp")
+                    with open(temp_file, 'w') as f:
+                        f.write(sshd_content)
+                        f.write("\n# Allow user environment for Homebrew PATH\n")
+                        f.write("PermitUserEnvironment yes\n")
+                    
+                    self.run_sudo_command(f"cp {temp_file} /etc/ssh/sshd_config")
+                    temp_file.unlink()
+                    
+                    # Restart SSH service
+                    self.run_sudo_command("systemctl restart ssh", check=False)
+                    print("✓ Configured SSH to accept environment variables")
+                else:
+                    print("✓ SSH already configured for environment variables")
+        
+        except Exception as e:
+            print(f"Warning: Could not update SSH config: {e}")
+        
+        # Create ~/.ssh/environment for user
+        print("Creating ~/.ssh/environment...")
+        try:
+            ssh_dir = Path.home() / ".ssh"
+            ssh_dir.mkdir(mode=0o700, exist_ok=True)
+            
+            ssh_env = ssh_dir / "environment"
+            with open(ssh_env, 'w') as f:
+                f.write(f"PATH={homebrew_path}:{homebrew_sbin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n")
+            
+            ssh_env.chmod(0o600)
+            print("✓ Created ~/.ssh/environment")
+        
+        except Exception as e:
+            print(f"Warning: Could not create ~/.ssh/environment: {e}")
+        
+        # Update current session PATH
+        os.environ['PATH'] = f"{homebrew_path}:{homebrew_sbin}:{os.environ.get('PATH', '')}"
+        
+        print("✓ System-wide PATH configuration completed")
     
     def setup_ssh(self):
         """Setup SSH client and server"""
@@ -359,18 +497,14 @@ echo '{self.password}'
 ASKPASS_EOF
 chmod +x $SUDO_ASKPASS
 
-# Create a temporary file with the password for the script
-PASSWORD_FILE=/tmp/password_{os.getpid()}.txt
-echo '{self.password}' > $PASSWORD_FILE
-
-# Run the setup script with sudo -A (use askpass)
+# Run the setup script WITHOUT --password flag
+# The worker node doesn't need password for SSH setup (already has keys from master)
 # Use --non-interactive flag to skip confirmation prompts
-# Pipe password to avoid password prompt
 export SUDO_ASKPASS
-python3 {temp_script} --config {temp_config} --password --non-interactive < $PASSWORD_FILE
+python3 {temp_script} --config {temp_config} --non-interactive
 
 # Cleanup
-rm -f $SUDO_ASKPASS $PASSWORD_FILE
+rm -f $SUDO_ASKPASS
 """
                 
                 temp_wrapper = f"/tmp/wrapper_{os.getpid()}.sh"
@@ -452,11 +586,7 @@ rm -f $SUDO_ASKPASS $PASSWORD_FILE
         print(f"{'=' * 60}")
         print(f"Will setup {len(self.worker_ips)} worker node(s)")
         print(f"Worker IPs: {', '.join(self.worker_ips)}")
-        
-        response = input("\nProceed with automatic worker setup? (y/N): ")
-        if response.lower() != 'y':
-            print("Automatic worker setup cancelled")
-            return False
+        print("\nProceeding with automatic worker setup...")
         
         success_count = 0
         failed_nodes = []
@@ -514,25 +644,20 @@ rm -f $SUDO_ASKPASS $PASSWORD_FILE
             print("/etc/hosts already contains cluster node entries")
     
     def install_slurm(self):
-        """Install Slurm using Homebrew"""
+        """Install Slurm workload manager using apt"""
         print("\n=== Installing Slurm ===")
         
-        # Ensure brew is in PATH
-        self.run_command("eval \"$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)\"", check=False)
-        
-        brew_cmd = "/home/linuxbrew/.linuxbrew/bin/brew"
-        if not os.path.exists(brew_cmd):
-            print("Error: Homebrew not found. Please install Homebrew first.")
+        # Check if Slurm is already installed
+        result = self.run_command("which slurmctld", check=False)
+        if result.returncode == 0:
+            print("Slurm already installed")
             return
         
-        # Install Slurm
-        print("Installing Slurm via Homebrew...")
-        result = self.run_command(f"{brew_cmd} install slurm", check=False)
-        
-        if result.returncode != 0:
-            print("Note: Slurm might not be available in Homebrew. Installing from apt...")
-            self.run_sudo_command("apt-get update")
-            self.run_sudo_command("apt-get install -y slurm-wlm slurm-wlm-doc")
+        # Note: Homebrew has a "slurm" package but it's a network monitor, not the workload manager
+        # We need to install slurm-wlm from apt instead
+        print("Installing Slurm workload manager from apt...")
+        self.run_sudo_command("apt-get update")
+        self.run_sudo_command("apt-get install -y slurm-wlm slurm-wlm-doc slurm-client")
         
         print("Slurm installation completed")
     
@@ -571,7 +696,8 @@ rm -f $SUDO_ASKPASS $PASSWORD_FILE
         
         for dir_path in slurm_dirs:
             self.run_sudo_command(f"mkdir -p {dir_path}")
-            self.run_sudo_command(f"chown -R {self.username}:{self.username} {dir_path}", check=False)
+            # Use slurm user for Slurm directories (required by slurmctld/slurmd)
+            self.run_sudo_command(f"chown -R slurm:slurm {dir_path}", check=False)
         
         # Generate slurm.conf
         slurm_conf = self.generate_slurm_conf()
@@ -582,22 +708,25 @@ rm -f $SUDO_ASKPASS $PASSWORD_FILE
         self.run_sudo_command("cp /tmp/slurm.conf /etc/slurm/slurm.conf")
         
         # Generate cgroup.conf
-        cgroup_conf = """CgroupAutomount=yes\nConstrainCores=yes\nConstrainRAMSpace=yes\n"""
+        # Note: CgroupAutomount is deprecated in Slurm 24.11+ and causes startup failures
+        cgroup_conf = """ConstrainCores=yes\nConstrainRAMSpace=yes\n"""
         with open('/tmp/cgroup.conf', 'w') as f:
             f.write(cgroup_conf)
-        
+
         self.run_sudo_command("cp /tmp/cgroup.conf /etc/slurm/cgroup.conf")
         
         print("Slurm configuration files created")
-        
-        # Start Slurm services
+
+        # Enable and start Slurm services using systemctl
         if self.is_master:
-            print("Starting Slurm controller (slurmctld)...")
-            self.run_sudo_command("slurmctld", check=False)
-        
-        print("Starting Slurm daemon (slurmd)...")
-        self.run_sudo_command("slurmd", check=False)
-        
+            print("Enabling and starting Slurm controller (slurmctld)...")
+            self.run_sudo_command("systemctl enable slurmctld", check=False)
+            self.run_sudo_command("systemctl restart slurmctld", check=False)
+
+        print("Enabling and starting Slurm daemon (slurmd)...")
+        self.run_sudo_command("systemctl enable slurmd", check=False)
+        self.run_sudo_command("systemctl restart slurmd", check=False)
+
         print("Slurm configured successfully")
     
     def generate_slurm_conf(self) -> str:
@@ -606,16 +735,17 @@ rm -f $SUDO_ASKPASS $PASSWORD_FILE
         try:
             cpu_result = self.run_command("nproc", check=False)
             cpus = cpu_result.stdout.strip() if cpu_result.returncode == 0 else "4"
-            
+
             mem_result = self.run_command("free -m | grep Mem | awk '{print $2}'", check=False)
             memory = mem_result.stdout.strip() if mem_result.returncode == 0 else "8000"
         except Exception:
             cpus = "4"
             memory = "8000"
-        
+
+        # Use master_hostname from initialization (consistent across all nodes)
         conf = f"""# slurm.conf - Slurm configuration file
 ClusterName=cluster
-SlurmctldHost=master({self.master_ip})
+SlurmctldHost={self.master_hostname}({self.master_ip})
 
 # Scheduling
 SchedulerType=sched/backfill
@@ -649,17 +779,17 @@ Waittime=0
 
 # Nodes
 """
-        # Add master node
-        conf += f"NodeName=master CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
+        # Add master node (use master_hostname from class attribute)
+        conf += f"NodeName={self.master_hostname} CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
 
         # Add worker nodes
         for idx, worker_ip in enumerate(self.worker_ips, start=1):
             conf += f"NodeName=worker{idx} CPUs={cpus} RealMemory={memory} State=UNKNOWN\n"
 
         # Add partition
-        all_nodes = "master," + ",".join([f"worker{i+1}" for i in range(len(self.worker_ips))])
+        all_nodes = f"{self.master_hostname}," + ",".join([f"worker{i+1}" for i in range(len(self.worker_ips))])
         conf += f"\n# Partitions\nPartitionName=all Nodes={all_nodes} Default=YES MaxTime=INFINITE State=UP\n"
-        
+
         return conf
     
     def configure_openmpi(self):
@@ -740,6 +870,7 @@ Waittime=0
         try:
             # Setup steps for current node
             self.install_homebrew()
+            self.configure_system_path()  # Configure PATH after Homebrew installation
             self.setup_ssh()
             self.configure_passwordless_ssh()
             self.configure_hosts_file()

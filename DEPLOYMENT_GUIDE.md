@@ -192,6 +192,42 @@ eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
 ```
 
+### Issue: Slurm services fail to start (24.11+)
+
+**Symptoms**:
+- `Incorrect permissions on state save loc: /var/spool/slurm/ctld`
+- `The option "CgroupAutomount" is defunct`
+- `Unable to determine this slurmd's NodeName`
+- `sinfo` returns "Unable to contact slurm controller"
+
+**Cause**: Slurm 24.11+ has breaking changes with deprecated options and stricter permission requirements.
+
+**Solution**: The latest version of the script (October 2025+) automatically handles these issues:
+- ✅ Removes deprecated `CgroupAutomount` from cgroup.conf
+- ✅ Uses actual system hostname instead of hardcoded "master"
+- ✅ Sets proper directory ownership to `slurm:slurm` user/group
+- ✅ Uses systemctl to manage services
+- ✅ Worker nodes automatically receive the same fixes via SSH
+
+If you installed before these fixes, manually apply them:
+```bash
+# Fix cgroup.conf
+sudo sed -i '/CgroupAutomount/d' /etc/slurm/cgroup.conf
+
+# Fix directory permissions
+sudo chown -R slurm:slurm /var/spool/slurm/ctld
+sudo chown -R slurm:slurm /var/spool/slurm/d
+sudo chown -R slurm:slurm /var/log/slurm
+
+# Update hostname in slurm.conf (replace ACTUAL-HOSTNAME with output of `hostname`)
+hostname
+sudo nano /etc/slurm/slurm.conf  # Update NodeName and SlurmctldHost
+
+# Restart services
+sudo systemctl restart slurmctld  # Master only
+sudo systemctl restart slurmd     # All nodes
+```
+
 ### Issue: WSL symlink errors with uv
 
 **Symptom**: `Operation not permitted (os error 1)`

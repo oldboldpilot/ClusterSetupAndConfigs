@@ -383,15 +383,57 @@ sudo fuser /var/lib/dpkg/lock-frontend
 
 ### Slurm Service Issues
 
-```bash
-# Add Homebrew to PATH
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+**Problem**: Slurm services fail to start with errors like:
+- `Incorrect permissions on state save loc: /var/spool/slurm/ctld`
+- `The option "CgroupAutomount" is defunct`
+- `Unable to determine this slurmd's NodeName`
 
-# Restart Slurm services
-sudo killall slurmctld slurmd
-sudo slurmctld  # On master only
-sudo slurmd     # On all nodes
+**Solution**:
+
+1. **Fix deprecated CgroupAutomount option** (Slurm 24.11+):
+```bash
+# Remove the deprecated option from cgroup.conf
+sudo sed -i '/CgroupAutomount/d' /etc/slurm/cgroup.conf
 ```
+
+2. **Fix directory permissions** (must be owned by slurm user):
+```bash
+sudo chown -R slurm:slurm /var/spool/slurm/ctld
+sudo chown -R slurm:slurm /var/spool/slurm/d
+sudo chown -R slurm:slurm /var/log/slurm
+```
+
+3. **Fix hostname mismatch** (slurm.conf must use actual hostname):
+```bash
+# Check your actual hostname
+hostname
+
+# Update slurm.conf to use actual hostname instead of "master"
+# Edit /etc/slurm/slurm.conf and replace:
+#   NodeName=master -> NodeName=ACTUAL-HOSTNAME
+#   SlurmctldHost=master -> SlurmctldHost=ACTUAL-HOSTNAME
+```
+
+4. **Restart Slurm services**:
+```bash
+sudo systemctl restart slurmctld  # On master only
+sudo systemctl restart slurmd     # On all nodes
+
+# Check status
+systemctl status slurmctld
+systemctl status slurmd
+
+# Test
+sinfo
+```
+
+**Note**: The latest version of the script (as of October 2025) automatically handles these issues on both master and worker nodes. When workers are set up automatically via SSH, they receive the same configuration fixes.
+
+**Worker Node Setup**: When using the `--password` flag on the master, worker nodes automatically receive:
+- Correct master hostname in slurm.conf (fetched via SSH from master)
+- Fixed cgroup.conf without deprecated options
+- Proper directory permissions for Slurm services
+- Systemctl service management
 
 ### OpenMPI Issues
 
