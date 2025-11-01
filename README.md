@@ -487,19 +487,37 @@ For **Linux/Ubuntu** with ufw:
 sudo ufw allow 50000:50200/tcp comment 'OpenMPI PRRTE'
 ```
 
-For **WSL** - **SOLUTION PROVIDED**:
+For **WSL** - **CRITICAL CONFIGURATION REQUIRED**:
 
-Windows Firewall blocks MPI ports by default. We provide PowerShell scripts to fix this:
+Windows Firewall and WSL Hyper-V VM settings block MPI communication by default. We provide PowerShell scripts to configure everything:
 
 ```powershell
 # Open PowerShell as Administrator on Windows, navigate to project directory
 cd Z:\PycharmProjects\ClusterSetupAndConfigs
 
-# Step 1: Configure Windows Firewall (required, persists across reboots)
+# REQUIRED: Configure WSL Hyper-V firewall and Windows Firewall rules
 .\configure_wsl_firewall.ps1
+```
 
-# Step 2: Setup port forwarding (optional, only if external access needed)
-.\setup_wsl_port_forwarding.ps1
+**What this script does:**
+1. **Sets WSL Hyper-V VM firewall to allow inbound connections** (CRITICAL!)
+   - Runs: `Set-NetFirewallHyperVVMSetting -Name <VM> -DefaultInboundAction Allow`
+   - Reference: [Microsoft WSL Networking Docs](https://learn.microsoft.com/en-us/windows/wsl/networking)
+   - Without this, MPI daemon communication will fail even with mirrored mode
+2. Creates Windows Firewall rules for MPI port ranges (50000-50200)
+3. Configures both inbound and outbound rules
+
+**Manual configuration (alternative to script):**
+```powershell
+# Get your WSL VM ID
+Get-NetFirewallHyperVVMSetting -PolicyStore ActiveStore
+
+# Enable inbound connections (use the VM Name from above)
+Set-NetFirewallHyperVVMSetting -Name '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -DefaultInboundAction Allow -PolicyStore ActiveStore
+
+# Verify
+Get-NetFirewallHyperVVMSetting -PolicyStore ActiveStore
+# Should show: DefaultInboundAction : Allow
 ```
 
 The cluster setup script automatically detects WSL and displays these instructions.
@@ -574,12 +592,30 @@ cat ~/.openmpi/mca-params.conf
    ```
 
    **Prerequisites:**
-   - WSL with mirrored networking mode enabled
-   - OpenMPI 5.x installed on all nodes
-   - SSH keys configured for passwordless access
+   1. **WSL with mirrored networking mode enabled**
+      - Create/edit `C:\Users\YourUsername\.wslconfig`:
+        ```ini
+        [wsl2]
+        networkingMode=mirrored
+        ```
+      - Restart WSL: `wsl --shutdown`
+
+   2. **WSL Hyper-V VM firewall configured** (CRITICAL!)
+      - Run PowerShell as Administrator:
+        ```powershell
+        Set-NetFirewallHyperVVMSetting -Name '{YOUR-VM-ID}' -DefaultInboundAction Allow
+        ```
+      - Or use the provided script: `.\configure_wsl_firewall.ps1`
+      - Reference: [Microsoft WSL Networking](https://learn.microsoft.com/en-us/windows/wsl/networking)
+
+   3. **OpenMPI 5.x installed on all nodes**
+      - `brew install open-mpi`
+
+   4. **SSH keys configured for passwordless access**
+      - `ssh-keygen` + `ssh-copy-id`
 
    **Verified working configuration:**
-   - Master: WSL Ubuntu with mirrored mode (192.168.1.147)
+   - Master: WSL Ubuntu with mirrored mode + Hyper-V firewall configured (192.168.1.147)
    - Worker 1: Native Ubuntu Linux (192.168.1.139)
    - Worker 2: Native Ubuntu Linux (192.168.1.96)
 
