@@ -160,10 +160,19 @@ Create a configuration file (e.g., `cluster_config.yaml`):
 ```yaml
 master_ip: "192.168.1.147"
 worker_ips:
-  - "192.168.1.137"
+  - "192.168.1.139"
   - "192.168.1.96"
 username: "muyiwa"
+
+# OpenMP thread configuration (optional)
+# Maximum threads available per node - use 'nproc' to determine
+threads:
+  192.168.1.147: 32  # master node
+  192.168.1.139: 16  # worker1
+  192.168.1.96: 16   # worker2
 ```
+
+**Note:** The `threads` section is optional but recommended for hybrid MPI+OpenMP programs. It documents the maximum thread count available on each node.
 
 ### Automatic Full Cluster Setup (Recommended)
 
@@ -704,17 +713,118 @@ import numpy as np
 result = np.dot(large_matrix_a, large_matrix_b)
 ```
 
-**Combining OpenMP + OpenMPI (Hybrid Parallelism):**
-Use OpenMP within each node and MPI across nodes:
+**Finding Maximum Thread Count:**
+
+Determine the optimal number of threads for each node:
 
 ```bash
-# 2 MPI processes per node, each with 4 OpenMP threads
-export OMP_NUM_THREADS=4
+# Get number of CPU cores/threads on current node
+nproc
+
+# Detailed CPU information
+lscpu | grep -E "^CPU\(s\)|Thread|Core"
+
+# Check all nodes
+pdsh -w 192.168.1.[147,139,96] "nproc"
+
+# For OpenMP programs, also check at runtime
+export OMP_NUM_THREADS=$(nproc)
+```
+
+**Your cluster configuration:**
+- Master (192.168.1.147): 32 threads (16 cores × 2 threads/core)
+- Worker 1 (192.168.1.139): 16 threads
+- Worker 2 (192.168.1.96): 16 threads
+
+**Combining OpenMP + OpenMPI (Hybrid Parallelism):**
+
+Hybrid parallelism uses MPI for inter-node communication and OpenMP for intra-node threading. This maximizes resource utilization.
+
+**Strategy 1: Maximum threads per MPI process**
+```bash
+# 1 MPI process per node, all cores as OpenMP threads
+# Total: 3 MPI processes × their respective thread counts
+export OMP_NUM_THREADS=32  # On master
+mpirun -np 3 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+  --oversubscribe --map-by node \
+  --mca btl_tcp_if_include 192.168.1.0/24 \
+  --bind-to none \
+  ./my_hybrid_program
+
+# Workers will use their available cores (16 each)
+```
+
+**Strategy 2: Balanced MPI processes with OpenMP threads**
+```bash
+# 2 MPI processes per node, each with 8 threads (for 16-core nodes)
+# Master: 2 processes × 16 threads = 32 threads
+# Workers: 2 processes × 8 threads = 16 threads each
+export OMP_NUM_THREADS=8
 mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
   --oversubscribe --map-by node \
   --mca btl_tcp_if_include 192.168.1.0/24 \
   --bind-to none \
   ./my_hybrid_program
+```
+
+**Strategy 3: Per-node thread configuration**
+```bash
+# Set different thread counts per node using rankfile
+# Create a rankfile specifying MPI ranks and thread bindings
+
+# Or use environment variable per execution
+# Master with 16 threads per process, workers with 8
+OMP_NUM_THREADS=16 mpirun -np 1 --host 192.168.1.147 \
+  --mca btl_tcp_if_include 192.168.1.0/24 \
+  ./program : \
+  -np 2 --host 192.168.1.139,192.168.1.96 \
+  bash -c 'OMP_NUM_THREADS=8 ./program'
+```
+
+**Important flags for hybrid parallelism:**
+- `--bind-to none` - Allows OpenMP to manage thread binding instead of MPI
+- `OMP_NUM_THREADS` - Sets OpenMP thread count
+- Consider setting `OMP_PROC_BIND=true` for thread affinity
+- Use `OMP_PLACES=cores` or `OMP_PLACES=threads` for fine-grained control
+
+**Example hybrid program (C):**
+```c
+#include <mpi.h>
+#include <omp.h>
+#include <stdio.h>
+
+int main(int argc, char** argv) {
+    int rank, size;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        int nthreads = omp_get_num_threads();
+        #pragma omp critical
+        printf("MPI rank %d/%d, OpenMP thread %d/%d\n",
+               rank, size, tid, nthreads);
+    }
+
+    MPI_Finalize();
+    return 0;
+}
+```
+
+**Compile and run:**
+```bash
+# Compile with both MPI and OpenMP support
+mpicc -fopenmp hybrid_program.c -o hybrid_program
+
+# Run with 6 MPI processes, 8 OpenMP threads each
+export OMP_NUM_THREADS=8
+mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+  --oversubscribe --map-by node \
+  --mca btl_tcp_if_include 192.168.1.0/24 \
+  --bind-to none \
+  ./hybrid_program
 ```
 
 **Verify OpenMP installation:**
@@ -724,6 +834,9 @@ echo | gcc -fopenmp -x c - -o /tmp/test_omp && echo "OpenMP supported"
 
 # Check libomp installation
 brew list libomp
+
+# Runtime verification
+OMP_NUM_THREADS=4 ./openmp_program
 ```
 
 ### For Detailed Troubleshooting

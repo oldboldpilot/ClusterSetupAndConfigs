@@ -4,3 +4,11 @@ workers:
   - 192.168.1.12
 # Optional
 username: myuser
+
+# OpenMP thread configuration (optional)
+# Maximum threads available per node
+# Run 'nproc' on each node to determine the value
+threads:
+  192.168.1.10: 32  # master node
+  192.168.1.11: 16  # worker1
+  192.168.1.12: 16  # worker2
