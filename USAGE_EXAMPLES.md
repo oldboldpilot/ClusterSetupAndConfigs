@@ -350,12 +350,12 @@ ip addr show | grep "inet "
 
 **Example**:
 ```bash
-# Config says master_ip: "192.168.1.147"
+# Config says master_ip: "192.168.1.10"
 # But your IPs are: ['127.0.0.1', '172.25.40.179', '10.1.96.192']
 # → master_ip not found in local IPs
 
-# Solution: Either update config or run from 192.168.1.147
-ssh 192.168.1.147
+# Solution: Either update config or run from 192.168.1.10
+ssh 192.168.1.10
 cd /path/to/ClusterSetupAndConfigs
 export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 uv run python cluster_setup.py --config cluster_config.yaml --password

@@ -106,7 +106,7 @@ uv python list
 ### Check Current Environment
 ```bash
 echo $UV_PROJECT_ENVIRONMENT
-# Should output: /home/muyiwa/.venv/cluster-setup
+# Should output: /home/ubuntu/.venv/cluster-setup
 ```
 
 ### List Installed Packages
@@ -246,10 +246,10 @@ ClusterSetupAndConfigs/
 The project uses YAML configuration files with the following format:
 
 ```yaml
-master_ip: "192.168.1.147"
+master_ip: "192.168.1.10"
 worker_ips:
-  - "192.168.1.137"
-  - "192.168.1.96"
+  - "192.168.1.11"
+  - "192.168.1.12"
 username: "myuser"  # optional, defaults to current user
 ```
 

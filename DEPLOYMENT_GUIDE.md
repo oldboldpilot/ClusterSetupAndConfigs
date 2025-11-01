@@ -33,7 +33,7 @@ ip addr show | grep "inet "
 
 # Example output:
 #   inet 127.0.0.1/8 scope host lo
-#   inet 192.168.1.147/24 brd 192.168.1.255 scope global eth0
+#   inet 192.168.1.10/24 brd 192.168.1.255 scope global eth0
 ```
 
 Compare the output with the `master_ip` in your configuration file. You should see the master IP in the list.
@@ -58,10 +58,10 @@ uv sync
 Create a YAML file (e.g., `cluster_config.yaml`):
 
 ```yaml
-master_ip: "192.168.1.147"
+master_ip: "192.168.1.10"
 worker_ips:
-  - "192.168.1.137"
-  - "192.168.1.96"
+  - "192.168.1.11"
+  - "192.168.1.12"
 username: "your_username"
 ```
 

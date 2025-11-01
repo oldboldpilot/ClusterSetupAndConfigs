@@ -158,18 +158,18 @@ The script requires a YAML configuration file containing cluster node informatio
 Create a configuration file (e.g., `cluster_config.yaml`):
 
 ```yaml
-master_ip: "192.168.1.147"
+master_ip: "192.168.1.10"
 worker_ips:
-  - "192.168.1.139"
-  - "192.168.1.96"
-username: "muyiwa"
+  - "192.168.1.11"
+  - "192.168.1.12"
+username: "ubuntu"
 
 # OpenMP thread configuration (optional)
 # Maximum threads available per node - use 'nproc' to determine
 threads:
-  192.168.1.147: 32  # master node
-  192.168.1.139: 16  # worker1
-  192.168.1.96: 16   # worker2
+  192.168.1.10: 32  # master node
+  192.168.1.11: 16  # worker1
+  192.168.1.12: 16   # worker2
 ```
 
 **Note:** The `threads` section is optional but recommended for hybrid MPI+OpenMP programs. It documents the maximum thread count available on each node.
@@ -236,23 +236,23 @@ python cluster_setup.py --help
 ### Complete Example
 
 For a cluster with:
-- Master node: 192.168.1.147
-- Worker nodes: 192.168.1.137, 192.168.1.96
-- Username: muyiwa
+- Master node: 192.168.1.10
+- Worker nodes: 192.168.1.11, 192.168.1.12
+- Username: ubuntu
 
 1. **Verify you're on the master node**:
 ```bash
-ip addr show | grep "inet " | grep 192.168.1.147
+ip addr show | grep "inet " | grep 192.168.1.10
 # Should see output if you're on the master node
 ```
 
 2. Create `cluster_config.yaml`:
 ```yaml
-master_ip: "192.168.1.147"
+master_ip: "192.168.1.10"
 worker_ips:
-  - "192.168.1.137"
-  - "192.168.1.96"
-username: "muyiwa"
+  - "192.168.1.11"
+  - "192.168.1.12"
+username: "ubuntu"
 ```
 
 3. Run on master node with automatic full cluster setup:
@@ -579,7 +579,7 @@ cat ~/.openmpi/mca-params.conf
    **The solution that works:**
    ```bash
    mpirun -np 6 \
-     --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+     --host 192.168.1.10,192.168.1.11,192.168.1.12 \
      --oversubscribe \
      --map-by node \
      --mca btl_tcp_if_include 192.168.1.0/24 \
@@ -594,12 +594,12 @@ cat ~/.openmpi/mca-params.conf
    **Example commands:**
    ```bash
    # Simple hostname test (verified working)
-   mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+   mpirun -np 6 --host 192.168.1.10,192.168.1.11,192.168.1.12 \
      --oversubscribe --map-by node --mca btl_tcp_if_include 192.168.1.0/24 \
      hostname
 
    # Python script
-   mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+   mpirun -np 6 --host 192.168.1.10,192.168.1.11,192.168.1.12 \
      --oversubscribe --map-by node --mca btl_tcp_if_include 192.168.1.0/24 \
      python3 my_script.py
    ```
@@ -628,9 +628,9 @@ cat ~/.openmpi/mca-params.conf
       - `ssh-keygen` + `ssh-copy-id`
 
    **Verified working configuration:**
-   - Master: WSL Ubuntu with mirrored mode + Hyper-V firewall configured (192.168.1.147)
-   - Worker 1: Native Ubuntu Linux (192.168.1.139)
-   - Worker 2: Native Ubuntu Linux (192.168.1.96)
+   - Master: WSL Ubuntu with mirrored mode + Hyper-V firewall configured (192.168.1.10)
+   - Worker 1: Native Ubuntu Linux (192.168.1.11)
+   - Worker 2: Native Ubuntu Linux (192.168.1.12)
 
 2. **Use pdsh for embarrassingly parallel tasks** (RECOMMENDED - Works NOW, no WSL changes needed):
    ```bash
@@ -732,9 +732,9 @@ export OMP_NUM_THREADS=$(nproc)
 ```
 
 **Your cluster configuration:**
-- Master (192.168.1.147): 32 threads (16 cores × 2 threads/core)
-- Worker 1 (192.168.1.139): 16 threads
-- Worker 2 (192.168.1.96): 16 threads
+- Master (192.168.1.10): 32 threads (16 cores × 2 threads/core)
+- Worker 1 (192.168.1.11): 16 threads
+- Worker 2 (192.168.1.12): 16 threads
 
 **Combining OpenMP + OpenMPI (Hybrid Parallelism):**
 
@@ -745,7 +745,7 @@ Hybrid parallelism uses MPI for inter-node communication and OpenMP for intra-no
 # 1 MPI process per node, all cores as OpenMP threads
 # Total: 3 MPI processes × their respective thread counts
 export OMP_NUM_THREADS=32  # On master
-mpirun -np 3 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+mpirun -np 3 --host 192.168.1.10,192.168.1.11,192.168.1.12 \
   --oversubscribe --map-by node \
   --mca btl_tcp_if_include 192.168.1.0/24 \
   --bind-to none \
@@ -760,7 +760,7 @@ mpirun -np 3 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
 # Master: 2 processes × 16 threads = 32 threads
 # Workers: 2 processes × 8 threads = 16 threads each
 export OMP_NUM_THREADS=8
-mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+mpirun -np 6 --host 192.168.1.10,192.168.1.11,192.168.1.12 \
   --oversubscribe --map-by node \
   --mca btl_tcp_if_include 192.168.1.0/24 \
   --bind-to none \
@@ -774,10 +774,10 @@ mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
 
 # Or use environment variable per execution
 # Master with 16 threads per process, workers with 8
-OMP_NUM_THREADS=16 mpirun -np 1 --host 192.168.1.147 \
+OMP_NUM_THREADS=16 mpirun -np 1 --host 192.168.1.10 \
   --mca btl_tcp_if_include 192.168.1.0/24 \
   ./program : \
-  -np 2 --host 192.168.1.139,192.168.1.96 \
+  -np 2 --host 192.168.1.11,192.168.1.12 \
   bash -c 'OMP_NUM_THREADS=8 ./program'
 ```
 
@@ -820,7 +820,7 @@ mpicc -fopenmp hybrid_program.c -o hybrid_program
 
 # Run with 6 MPI processes, 8 OpenMP threads each
 export OMP_NUM_THREADS=8
-mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+mpirun -np 6 --host 192.168.1.10,192.168.1.11,192.168.1.12 \
   --oversubscribe --map-by node \
   --mca btl_tcp_if_include 192.168.1.0/24 \
   --bind-to none \
