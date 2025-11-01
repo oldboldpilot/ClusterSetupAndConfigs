@@ -51,3 +51,4 @@ temp/
 *.tmp
 #yaml
 cluster_config_actual.yaml
+mpi_hostfile

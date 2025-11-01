@@ -3,7 +3,7 @@ name = "cluster-setup"
 version = "0.1.0"
 description = "Cluster setup and configuration tools for Slurm and OpenMPI"
 requires-python = ">=3.13"
-dependencies = ["PyYAML>=6.0", "textual>=0.47.0"]
+dependencies = ["PyYAML>=6.0", "textual>=0.47.0", "mpi4py>=4.0.0"]
 
 [build-system]
 requires = ["hatchling"]
