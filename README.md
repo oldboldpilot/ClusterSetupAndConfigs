@@ -541,28 +541,66 @@ prun --version
 cat ~/.openmpi/mca-params.conf
 ```
 
-**Recommended Alternatives for WSL Cross-Cluster Execution**:
+**Recommended Solutions for WSL Cross-Cluster Execution**:
 
-1. **Use Slurm's `srun`** (Best option for true MPI programs):
+1. **Enable WSL Mirrored Networking Mode** (RECOMMENDED - Should fix MPI entirely):
+
+   WSL 2.0+ supports mirrored networking which eliminates NAT and gives WSL direct network access:
+
+   ```powershell
+   # On Windows, create/edit: C:\Users\YourUsername\.wslconfig
+   [wsl2]
+   networkingMode=mirrored
+
+   # Restart WSL
+   wsl --shutdown
+   ```
+
+   **Why this works:**
+   - Eliminates NAT/virtual network layer that breaks MPI daemon sockets
+   - WSL gets real IP on your LAN (same as Windows)
+   - Direct bidirectional network connectivity
+   - Should allow both OpenMPI and MPICH to work properly
+
+   **Requirements:**
+   - Windows 11 22H2 or later
+   - WSL 2.0+
+
+   After enabling, test MPI normally:
+   ```bash
+   mpirun -np 6 -hosts 192.168.1.147,192.168.1.137,192.168.1.96 hostname
+   ```
+
+2. **Use pdsh for embarrassingly parallel tasks** (Works NOW, no WSL changes needed):
+   ```bash
+   # Install pdsh
+   brew install pdsh
+
+   # Run commands across all nodes
+   pdsh -w 192.168.1.[147,137,96] 'python3 script.py'
+   pdsh -w 192.168.1.[147,137,96] hostname
+
+   # Verified working - uses only SSH (port 22)
+   ```
+
+3. **Use Slurm's `srun`** (For true MPI programs, requires Slurm setup):
    ```bash
    # Slurm handles process management without MPI daemons
    srun -N 2 -n 6 hostname
    srun -N 3 python my_mpi_program.py
    ```
 
-2. **Use pdsh for embarrassingly parallel tasks** (Simplest):
-   ```bash
-   pdsh -w 192.168.1.[147,137,96] 'python3 script.py'
-   ```
-
-3. **Native Linux** (Not WSL):
-   - If you need true MPI across clusters, consider running on native Linux instead of WSL
+4. **Use Native Linux** (Not WSL):
+   - If mirrored mode doesn't work or isn't available
    - OpenMPI and MPICH work properly on native Linux with correct firewall configuration
 
-**Not Recommended** (tested and confirmed to fail on WSL):
+**Not Recommended** (tested and confirmed to fail on WSL in default NAT mode):
 - ❌ OpenMPI 4.x - Same issues with orted daemon communication
 - ❌ MPICH - Same socket communication failures
 - ❌ Windows Firewall/port forwarding - Insufficient to solve the underlying issue
+- ❌ Elevated permissions (sudo) - Not a permission issue, but a NAT networking limitation
+
+**Note:** These limitations apply to WSL in default NAT networking mode. **Mirrored networking mode should solve all of these issues.**
 
 ### For Detailed Troubleshooting
 
