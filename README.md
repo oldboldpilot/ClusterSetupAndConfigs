@@ -543,34 +543,45 @@ cat ~/.openmpi/mca-params.conf
 
 **Recommended Solutions for WSL Cross-Cluster Execution**:
 
-1. **Enable WSL Mirrored Networking Mode** (May help for all-WSL clusters):
+1. **Use OpenMPI with Correct Flags** (✅ WORKS - Verified on WSL master + Native Linux workers):
 
-   WSL 2.0+ supports mirrored networking which eliminates NAT and gives WSL direct network access:
-
-   ```powershell
-   # On Windows, create/edit: C:\Users\YourUsername\.wslconfig
-   [wsl2]
-   networkingMode=mirrored
-
-   # Restart WSL
-   wsl --shutdown
+   **The solution that works:**
+   ```bash
+   mpirun -np 6 \
+     --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+     --oversubscribe \
+     --map-by node \
+     --mca btl_tcp_if_include 192.168.1.0/24 \
+     your_program
    ```
 
-   **Why this might work:**
-   - Eliminates NAT/virtual network layer that breaks MPI daemon sockets
-   - WSL gets real IP on your LAN (same as Windows)
-   - Direct bidirectional network connectivity
-   - May allow OpenMPI and MPICH to work if ALL nodes are WSL with mirrored mode
+   **Required flags:**
+   - `--oversubscribe` - Allows running more processes than detected slots
+   - `--map-by node` - Forces round-robin distribution across nodes (critical!)
+   - `--mca btl_tcp_if_include 192.168.1.0/24` - Specifies correct network interface/subnet
 
-   **Important limitation discovered:**
-   - ❌ **Does NOT fix WSL master → Native Linux workers setup**
-   - Even with mirrored mode, WSL's socket handling still causes "Bad file descriptor" errors
-   - Only potentially helps when ALL nodes are WSL with mirrored mode enabled
+   **Example commands:**
+   ```bash
+   # Simple hostname test (verified working)
+   mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+     --oversubscribe --map-by node --mca btl_tcp_if_include 192.168.1.0/24 \
+     hostname
 
-   **Requirements:**
-   - Windows 11 22H2 or later
-   - WSL 2.0+
-   - All cluster nodes must be WSL (not mixed with native Linux)
+   # Python script
+   mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+     --oversubscribe --map-by node --mca btl_tcp_if_include 192.168.1.0/24 \
+     python3 my_script.py
+   ```
+
+   **Prerequisites:**
+   - WSL with mirrored networking mode enabled
+   - OpenMPI 5.x installed on all nodes
+   - SSH keys configured for passwordless access
+
+   **Verified working configuration:**
+   - Master: WSL Ubuntu with mirrored mode (192.168.1.147)
+   - Worker 1: Native Ubuntu Linux (192.168.1.139)
+   - Worker 2: Native Ubuntu Linux (192.168.1.96)
 
 2. **Use pdsh for embarrassingly parallel tasks** (RECOMMENDED - Works NOW, no WSL changes needed):
    ```bash
@@ -595,13 +606,22 @@ cat ~/.openmpi/mca-params.conf
    - If mirrored mode doesn't work or isn't available
    - OpenMPI and MPICH work properly on native Linux with correct firewall configuration
 
-**Not Recommended** (tested and confirmed to fail on WSL in default NAT mode):
-- ❌ OpenMPI 4.x - Same issues with orted daemon communication
-- ❌ MPICH - Same socket communication failures
-- ❌ Windows Firewall/port forwarding - Insufficient to solve the underlying issue
-- ❌ Elevated permissions (sudo) - Not a permission issue, but a NAT networking limitation
+**Important MPI Configuration Notes**:
 
-**Note:** These limitations apply to WSL-based clusters. **Mirrored networking mode does NOT solve the issue when mixing WSL (master) with native Linux (workers).** Testing confirmed that even with mirrored mode enabled, MPI daemon communication fails with "Bad file descriptor" errors in hybrid WSL+Linux setups.
+**What DOESN'T work (without correct flags):**
+- ❌ Default `mpirun` without `--map-by node` - Runs all processes on master only
+- ❌ MPICH - Socket communication failures even with correct configuration
+- ❌ WSL without mirrored networking mode - NAT breaks daemon communication
+
+**Critical flags discovered:**
+- ✅ `--map-by node` is **essential** for distributing processes across nodes
+- ✅ `--oversubscribe` allows flexible process allocation
+- ✅ `--mca btl_tcp_if_include` with correct subnet ensures proper network interface selection
+
+**Note:** OpenMPI 5.x WORKS on hybrid WSL+Linux clusters when:
+1. WSL is configured with mirrored networking mode
+2. Correct mpirun flags are used (`--map-by node` is critical)
+3. Network interface is explicitly specified via MCA parameter
 
 ### For Detailed Troubleshooting
 
