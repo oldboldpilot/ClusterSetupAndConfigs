@@ -543,7 +543,7 @@ cat ~/.openmpi/mca-params.conf
 
 **Recommended Solutions for WSL Cross-Cluster Execution**:
 
-1. **Enable WSL Mirrored Networking Mode** (RECOMMENDED - Should fix MPI entirely):
+1. **Enable WSL Mirrored Networking Mode** (May help for all-WSL clusters):
 
    WSL 2.0+ supports mirrored networking which eliminates NAT and gives WSL direct network access:
 
@@ -556,22 +556,23 @@ cat ~/.openmpi/mca-params.conf
    wsl --shutdown
    ```
 
-   **Why this works:**
+   **Why this might work:**
    - Eliminates NAT/virtual network layer that breaks MPI daemon sockets
    - WSL gets real IP on your LAN (same as Windows)
    - Direct bidirectional network connectivity
-   - Should allow both OpenMPI and MPICH to work properly
+   - May allow OpenMPI and MPICH to work if ALL nodes are WSL with mirrored mode
+
+   **Important limitation discovered:**
+   - ❌ **Does NOT fix WSL master → Native Linux workers setup**
+   - Even with mirrored mode, WSL's socket handling still causes "Bad file descriptor" errors
+   - Only potentially helps when ALL nodes are WSL with mirrored mode enabled
 
    **Requirements:**
    - Windows 11 22H2 or later
    - WSL 2.0+
+   - All cluster nodes must be WSL (not mixed with native Linux)
 
-   After enabling, test MPI normally:
-   ```bash
-   mpirun -np 6 -hosts 192.168.1.147,192.168.1.137,192.168.1.96 hostname
-   ```
-
-2. **Use pdsh for embarrassingly parallel tasks** (Works NOW, no WSL changes needed):
+2. **Use pdsh for embarrassingly parallel tasks** (RECOMMENDED - Works NOW, no WSL changes needed):
    ```bash
    # Install pdsh
    brew install pdsh
@@ -600,7 +601,7 @@ cat ~/.openmpi/mca-params.conf
 - ❌ Windows Firewall/port forwarding - Insufficient to solve the underlying issue
 - ❌ Elevated permissions (sudo) - Not a permission issue, but a NAT networking limitation
 
-**Note:** These limitations apply to WSL in default NAT networking mode. **Mirrored networking mode should solve all of these issues.**
+**Note:** These limitations apply to WSL-based clusters. **Mirrored networking mode does NOT solve the issue when mixing WSL (master) with native Linux (workers).** Testing confirmed that even with mirrored mode enabled, MPI daemon communication fails with "Bad file descriptor" errors in hybrid WSL+Linux setups.
 
 ### For Detailed Troubleshooting
 
