@@ -278,7 +278,7 @@ The cluster setup script performs the following operations:
 
 1. **Node Detection**: Automatically detects if running on master or worker node by comparing local IPs
 2. **Homebrew Installation**: Installs Homebrew package manager on Ubuntu/WSL
-3. **SSH Setup**: 
+3. **SSH Setup**:
    - Installs OpenSSH client and server
    - Generates SSH keys for passwordless authentication
    - Automatically copies SSH keys to worker nodes (with `--password` flag)
@@ -290,16 +290,20 @@ The cluster setup script performs the following operations:
    - Monitors progress and reports any errors
 5. **Hosts File Configuration**: Updates `/etc/hosts` with all cluster node information
 6. **Slurm Installation**: Installs Slurm workload manager via Homebrew
-7. **OpenMPI Installation**: Installs OpenMPI for parallel computing
-8. **Slurm Configuration**: 
+7. **OpenMPI Installation**: Installs OpenMPI for distributed memory parallel computing
+8. **OpenMP Installation**: Installs OpenMP (libomp) for shared memory parallel computing
+   - Provides compiler support for `-fopenmp` flag
+   - Enables thread-level parallelism within a single node
+9. **Slurm Configuration**:
    - Creates necessary directories (`/var/spool/slurm`, `/var/log/slurm`, etc.)
    - Generates `slurm.conf` with cluster topology
    - Configures cgroup support
    - Starts Slurm services (slurmctld on master, slurmd on all nodes)
-9. **OpenMPI Configuration**: 
-   - Creates MPI hostfile with all cluster nodes
-   - Configures MCA parameters
-10. **Verification**: Tests all installed components
+10. **OpenMPI Configuration**:
+    - Creates MPI hostfile with all cluster nodes
+    - Configures MCA parameters for cross-cluster communication
+    - Sets up network interface parameters
+11. **Verification**: Tests all installed components
 
 ## Post-Installation Steps
 
@@ -658,6 +662,69 @@ cat ~/.openmpi/mca-params.conf
 1. WSL is configured with mirrored networking mode
 2. Correct mpirun flags are used (`--map-by node` is critical)
 3. Network interface is explicitly specified via MCA parameter
+
+### Using OpenMP for Shared Memory Parallelism
+
+OpenMP is automatically installed by the cluster setup script and provides thread-level parallelism within a single node.
+
+**Basic OpenMP Example (C/C++):**
+```c
+#include <omp.h>
+#include <stdio.h>
+
+int main() {
+    #pragma omp parallel
+    {
+        printf("Hello from thread %d of %d\n",
+               omp_get_thread_num(), omp_get_num_threads());
+    }
+    return 0;
+}
+```
+
+**Compile and run:**
+```bash
+# Compile with OpenMP support
+gcc -fopenmp hello_openmp.c -o hello_openmp
+
+# Run with specified number of threads
+export OMP_NUM_THREADS=4
+./hello_openmp
+```
+
+**Python with OpenMP (via NumPy/SciPy):**
+Many Python scientific libraries (NumPy, SciPy, scikit-learn) automatically use OpenMP for parallelization. You can control thread count:
+
+```python
+import os
+os.environ['OMP_NUM_THREADS'] = '4'  # Set before importing numpy
+import numpy as np
+
+# NumPy operations will use OpenMP threading
+result = np.dot(large_matrix_a, large_matrix_b)
+```
+
+**Combining OpenMP + OpenMPI (Hybrid Parallelism):**
+Use OpenMP within each node and MPI across nodes:
+
+```bash
+# 2 MPI processes per node, each with 4 OpenMP threads
+export OMP_NUM_THREADS=4
+mpirun -np 6 --host 192.168.1.147,192.168.1.139,192.168.1.96 \
+  --oversubscribe --map-by node \
+  --mca btl_tcp_if_include 192.168.1.0/24 \
+  --bind-to none \
+  ./my_hybrid_program
+```
+
+**Verify OpenMP installation:**
+```bash
+# Check if compiler supports OpenMP
+echo | gcc -fopenmp -x c - -o /tmp/test_omp && echo "OpenMP supported"
+
+# Check libomp installation
+brew list libomp
+```
 
 ### For Detailed Troubleshooting
 

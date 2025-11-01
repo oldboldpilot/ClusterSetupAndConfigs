@@ -688,7 +688,37 @@ rm -f $SUDO_ASKPASS
             self.run_sudo_command("apt-get install -y openmpi-bin openmpi-common libopenmpi-dev")
         
         print("OpenMPI installation completed")
-    
+
+    def install_openmp(self):
+        """Install OpenMP (libomp) using Homebrew"""
+        print("\n=== Installing OpenMP (libomp) ===")
+
+        brew_cmd = "/home/linuxbrew/.linuxbrew/bin/brew"
+        if not os.path.exists(brew_cmd):
+            print("Error: Homebrew not found. Please install Homebrew first.")
+            return
+
+        # Install libomp (OpenMP runtime library)
+        print("Installing libomp (OpenMP) via Homebrew...")
+        result = self.run_command(f"{brew_cmd} install libomp", check=False)
+
+        if result.returncode != 0:
+            print("Installing OpenMP from apt as fallback...")
+            self.run_sudo_command("apt-get update")
+            self.run_sudo_command("apt-get install -y libomp-dev")
+
+        print("OpenMP installation completed")
+
+        # Verify installation
+        try:
+            result = self.run_command("echo | gcc -fopenmp -x c - -o /tmp/test_omp 2>&1", check=False)
+            if result.returncode == 0:
+                print("✓ OpenMP compiler support verified")
+            else:
+                print("⚠ OpenMP compiler flags may need configuration")
+        except Exception as e:
+            print(f"Note: Could not verify OpenMP: {e}")
+
     def configure_slurm(self):
         """Configure Slurm for the cluster"""
         print("\n=== Configuring Slurm ===")
@@ -957,6 +987,7 @@ oob_tcp_port_range = 50100-50200
             self.configure_hosts_file()
             self.install_slurm()
             self.install_openmpi()
+            self.install_openmp()
             self.configure_slurm()
             self.configure_openmpi()
             self.verify_installation()
