@@ -329,13 +329,14 @@ class BenchmarkManager:
         """
         print("\n=== Creating Makefile ===")
         
-        # Default configuration
+        # Default configuration with full paths for MPI
+        ompi_prefix = '/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8'
         default_config = {
-            'upcxx_compiler': 'upcxx',
-            'mpi_compiler': 'mpicxx',
-            'openshmem_compiler': 'oshcc',
-            'berkeley_upc_compiler': 'upcc',
-            'cxx_compiler': 'g++',
+            'upcxx_compiler': '/home/linuxbrew/.linuxbrew/bin/upcxx',
+            'mpi_compiler': f'{ompi_prefix}/bin/mpicxx',
+            'openshmem_compiler': '/home/linuxbrew/.linuxbrew/bin/oshcc',
+            'berkeley_upc_compiler': '/home/linuxbrew/.linuxbrew/bin/upcc',
+            'cxx_compiler': '/home/linuxbrew/.linuxbrew/bin/g++',
             'upcxx_flags': '-std=c++23 -O3',
             'mpi_flags': '-std=c++23 -O3',
             'openshmem_flags': '-std=c++23 -O3',
@@ -445,36 +446,57 @@ class BenchmarkManager:
         
         return success
     
-    def compile_benchmarks(self) -> bool:
+    def compile_benchmarks(self, targets: Optional[List[str]] = None) -> bool:
         """
-        Compile all benchmarks using the generated Makefile.
-        
+        Compile benchmarks using the generated Makefile.
+
+        Args:
+            targets: Optional list of specific targets to compile (e.g., ['mpi_latency', 'hybrid_mpi_openmp'])
+                    If None, compiles all benchmarks
+
         Returns:
             bool: True if compilation successful, False otherwise
         """
         print("\n=== Compiling Benchmarks ===")
-        
+
         makefile_path = self.benchmark_dir / "Makefile"
         if not makefile_path.exists():
             print(f"✗ Makefile not found: {makefile_path}")
             return False
-        
+
+        # Determine targets
+        if targets is None:
+            print("  Compiling all benchmarks")
+        else:
+            print(f"  Compiling specific targets: {', '.join(targets)}")
+
         try:
+            # Clean first
+            subprocess.run(
+                ['make', '-C', str(self.benchmark_dir), 'clean'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            # Compile
             result = subprocess.run(
-                ['make', '-C', str(self.benchmark_dir), 'all'],
+                ['make', '-C', str(self.benchmark_dir)] + (targets if targets else ['all']),
                 capture_output=True,
                 text=True,
                 timeout=300
             )
-            
+
             if result.returncode == 0:
                 print("✓ Benchmarks compiled successfully")
+                if result.stdout:
+                    print(f"  Output: {result.stdout[:200]}...")
                 return True
             else:
                 print(f"✗ Compilation failed:")
-                print(result.stderr)
+                print(result.stderr[-1000:] if len(result.stderr) > 1000 else result.stderr)
                 return False
-                
+
         except subprocess.TimeoutExpired:
             print("✗ Compilation timed out")
             return False
@@ -591,7 +613,7 @@ class BenchmarkManager:
     def _get_local_ip(self) -> Optional[str]:
         """
         Get the local machine's IP address.
-        
+
         Returns:
             Optional[str]: Local IP address or None if not found
         """
@@ -604,3 +626,103 @@ class BenchmarkManager:
         except:
             pass
         return None
+
+    def run_mpi_benchmark_cluster(self, benchmark_name: str, num_procs: int = 4,
+                                   hostfile: str = "~/.openmpi/hostfile_optimal") -> bool:
+        """
+        Run an MPI benchmark across the entire cluster.
+
+        Args:
+            benchmark_name: Name of the benchmark to run (e.g., 'mpi_latency', 'hybrid_mpi_openmp')
+            num_procs: Number of MPI processes to launch
+            hostfile: Path to MPI hostfile
+
+        Returns:
+            bool: True if execution successful, False otherwise
+        """
+        print(f"\n=== Running {benchmark_name} Benchmark on Cluster ===")
+
+        # Expand hostfile path
+        import os
+        hostfile = os.path.expanduser(hostfile)
+
+        # Check if benchmark exists
+        benchmark_path = self.benchmark_dir / "bin" / benchmark_name
+        if not benchmark_path.exists():
+            print(f"✗ Benchmark not found: {benchmark_path}")
+            print("  Run compile_benchmarks() first")
+            return False
+
+        # MPI execution with proper flags
+        ompi_prefix = '/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8'
+        cmd = [
+            f'{ompi_prefix}/bin/mpirun',
+            '--prefix', ompi_prefix,
+            '--map-by', 'node',
+            '-np', str(num_procs),
+            '--hostfile', hostfile,
+            str(benchmark_path)
+        ]
+
+        print(f"Command: {' '.join(cmd)}")
+        print(f"Processes: {num_procs}")
+        print(f"Hostfile: {hostfile}")
+        print(f"{'='*70}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=False,  # Show output in real-time
+                text=True,
+                timeout=300
+            )
+
+            if result.returncode == 0:
+                print(f"{'='*70}")
+                print(f"✓ {benchmark_name} completed successfully")
+                return True
+            else:
+                print(f"✗ {benchmark_name} failed with exit code {result.returncode}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            print(f"✗ {benchmark_name} timed out")
+            return False
+        except Exception as e:
+            print(f"✗ Error running {benchmark_name}: {e}")
+            return False
+
+    def run_all_mpi_benchmarks_cluster(self, num_procs: int = 4) -> bool:
+        """
+        Run all MPI-based benchmarks across the cluster.
+
+        Args:
+            num_procs: Number of MPI processes per benchmark
+
+        Returns:
+            bool: True if all benchmarks ran successfully
+        """
+        print("\n" + "="*70)
+        print("RUNNING ALL MPI BENCHMARKS ON CLUSTER")
+        print("="*70)
+
+        mpi_benchmarks = [
+            'mpi_latency',
+            'hybrid_mpi_openmp'
+        ]
+
+        results = {}
+        for benchmark in mpi_benchmarks:
+            success = self.run_mpi_benchmark_cluster(benchmark, num_procs)
+            results[benchmark] = success
+
+        # Summary
+        print("\n" + "="*70)
+        print("BENCHMARK RESULTS SUMMARY")
+        print("="*70)
+        for benchmark, success in results.items():
+            status = "✓ PASSED" if success else "✗ FAILED"
+            print(f"  {benchmark:25s} {status}")
+        print("="*70)
+
+        return all(results.values())
