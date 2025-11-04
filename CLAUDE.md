@@ -637,6 +637,49 @@ mpirun --map-by node -np 12 --hostfile ~/.openmpi/hostfile ./my_program
 
 **Recommendation**: Use `hostfile_optimal` for hybrid MPI+OpenMP codes to achieve best performance on heterogeneous clusters.
 
+### UPC++ and PGAS Libraries
+
+The cluster setup now includes **Berkeley UPC++** and PGAS (Partitioned Global Address Space) programming support built from source:
+
+**Build Directory**: `~/cluster_sources` on each node (source code and compilation artifacts)
+
+**Installed Components**:
+- **GASNet-EX 2024.5.0**: `/home/linuxbrew/.linuxbrew/gasnet` - Communication layer
+- **UPC++ 2024.3.0**: `/home/linuxbrew/.linuxbrew/upcxx` - Berkeley C++ PGAS library  
+- **OpenSHMEM 1.5.2**: `/home/linuxbrew/.linuxbrew/openshmem` - Sandia SHMEM library
+- **Compiler Wrapper**: `/home/linuxbrew/.linuxbrew/bin/upcxx`
+
+**Quick Usage**:
+```bash
+# Compile UPC++ program
+/home/linuxbrew/.linuxbrew/bin/upcxx -O3 myprogram.cpp -o myprogram
+
+# Run on single node (SMP conduit)
+/home/linuxbrew/.linuxbrew/bin/upcxx-run -n 4 ./myprogram
+
+# Run across cluster (MPI conduit)
+/home/linuxbrew/.linuxbrew/bin/upcxx-run -ssh-servers 192.168.1.139,192.168.1.96,192.168.1.136 -n 12 ./myprogram
+```
+
+**Available Conduits**:
+- **SMP**: Shared memory (single node, best performance)
+- **MPI**: Multi-node via OpenMPI (cluster-ready)
+- **UDP**: Multi-node via UDP sockets (no MPI dependency)
+
+**When to Use UPC++**:
+- One-sided remote memory operations (rput/rget)
+- Irregular communication patterns
+- Asynchronous operations with futures
+- Global distributed data structures
+
+**Documentation**: https://upcxx.lbl.gov/docs/html/guide.html
+
+**Key Advantages over MPI**:
+- Simpler code for remote memory access
+- Built-in asynchronous operations
+- Global pointer abstraction
+- Good for dynamic/irregular algorithms
+
 ## Remember
 
 - This is a WSL environment with Windows filesystem mounts

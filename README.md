@@ -5,11 +5,18 @@ Automated cluster setup and configuration scripts for Slurm and OpenMPI on Ubunt
 ## Features
 
 - **Pure Python Implementation**: Written entirely in Python 3.14 for easy customization and maintenance
-- **Automated Installation**: Installs and configures Homebrew, Slurm, OpenMPI, and OpenSSH
+- **Comprehensive Parallel Programming Support**:
+  - **OpenMPI 5.0.8**: Message Passing Interface for distributed computing
+  - **OpenMP (libomp)**: Shared-memory thread-level parallelism
+  - **UPC++ (Berkeley)**: Partitioned Global Address Space (PGAS) programming in C++
+  - **GASNet**: High-performance communication system for PGAS languages
+  - **OpenSHMEM**: Symmetric memory access for parallel programming
+- **Automated Installation**: Installs and configures Homebrew, Slurm, and all parallel libraries
 - **Cluster-Ready**: Configures master and worker nodes for distributed computing
 - **Run from Any Node**: Setup entire cluster from master OR any worker node - automatic detection
 - **Multi-OS Support**: Works on Ubuntu Linux, WSL with Ubuntu, Red Hat, CentOS, and Fedora
 - **Smart Package Manager Detection**: Automatically uses apt-get (Ubuntu/Debian) or dnf (Red Hat/CentOS/Fedora)
+- **Homebrew-Based**: All parallel libraries installed via Homebrew for consistency
 
 ## Requirements
 
@@ -419,17 +426,27 @@ The cluster setup script performs the following operations:
 9. **OpenMP Installation**: Installs OpenMP (libomp) for shared memory parallel computing
    - Provides compiler support for `-fopenmp` flag
    - Enables thread-level parallelism within a single node
-10. **Firewall Configuration**: Automatically configures firewall for MPI communication
+10. **UPC++ and PGAS Libraries Installation**: Installs PGAS programming models from source
+   - **Build Directory**: `~/cluster_sources` on each node for source code and builds
+   - **GASNet-EX**: Communication layer with MPI, SMP, and UDP conduits
+   - **UPC++**: Berkeley's Unified Parallel C++ library for PGAS programming
+   - **OpenSHMEM**: Sandia's Symmetric Hierarchical Memory library
+   - **Installation**: `/home/linuxbrew/.linuxbrew/gasnet`, `/home/linuxbrew/.linuxbrew/upcxx`
+   - Compiler wrapper: `/home/linuxbrew/.linuxbrew/bin/upcxx`
+   - **Cluster-Wide Distribution**: Automatically copies binaries to all nodes with `--password` flag
+   - Supports multiple conduits: SMP (single-node), MPI (multi-node via OpenMPI), UDP
+   - Documentation: https://upcxx.lbl.gov/docs/html/guide.html
+11. **Firewall Configuration**: Automatically configures firewall for MPI communication
    - **Ubuntu/Debian**: Configures UFW (if active) to allow ports 50000-50200
    - **Red Hat/CentOS/Fedora**: Configures firewalld (if active) to allow ports 50000-50200
    - **WSL**: Displays instructions for Windows Firewall configuration
    - Ports: BTL TCP (50000+), OOB TCP (50100-50200) for PRRTE daemon communication
-11. **Slurm Configuration**:
+12. **Slurm Configuration**:
    - Creates necessary directories (`/var/spool/slurm`, `/var/log/slurm`, etc.)
    - Generates `slurm.conf` with cluster topology
    - Configures cgroup support
    - Starts Slurm services (slurmctld on master, slurmd on all nodes)
-12. **OpenMPI Configuration**:
+13. **OpenMPI Configuration**:
     - **Installation**: OpenMPI installed via Homebrew at `/home/linuxbrew/.linuxbrew/`
     - **Binary Path**: `/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8/bin/mpirun`
     - **Prefix**: `/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8`
@@ -441,7 +458,7 @@ The cluster setup script performs the following operations:
       mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
              --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./my_program
       ```
-13. **Verification**: Tests all installed components
+14. **Verification**: Tests all installed components
 
 ## Post-Installation Steps
 
@@ -1346,6 +1363,172 @@ OMP_NUM_THREADS=4 ./openmp_program
 ### For Detailed Troubleshooting
 
 See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for comprehensive troubleshooting steps
+
+## UPC++ and PGAS Programming
+
+### Overview
+
+The cluster supports **Partitioned Global Address Space (PGAS)** programming models through Berkeley UPC++, providing an alternative to traditional MPI programming with potentially simpler code for distributed memory operations.
+
+**Installed Libraries**:
+- **UPC++**: Berkeley's C++ library for PGAS programming
+- **GASNet**: Communication layer supporting multiple network conduits
+- **OpenSHMEM**: Symmetric memory access library for PGAS
+
+**Key Features**:
+- One-sided communication (direct remote memory access)
+- Asynchronous operations with futures/promises
+- Global pointer abstraction for distributed data
+- Efficient for irregular communication patterns
+- Simpler than MPI for certain algorithms
+
+### Installation Paths
+
+- **Build Directory**: `~/cluster_sources` (source code and build artifacts on each node)
+- **GASNet-EX**: `/home/linuxbrew/.linuxbrew/gasnet`
+- **UPC++ Installation**: `/home/linuxbrew/.linuxbrew/upcxx`
+- **OpenSHMEM**: `/home/linuxbrew/.linuxbrew/openshmem`
+- **UPC++ Compiler**: `/home/linuxbrew/.linuxbrew/bin/upcxx`
+- **UPC++ Runtime**: `/home/linuxbrew/.linuxbrew/bin/upcxx-run`
+- **Documentation**: https://upcxx.lbl.gov/docs/html/guide.html
+
+### Cluster-Wide Installation
+
+When running with the `--password` flag, the setup script automatically:
+1. Builds PGAS libraries from source in `~/cluster_sources` on the first node
+2. Distributes compiled binaries to all other cluster nodes via rsync
+3. Updates environment variables on all nodes
+4. Creates symbolic links for easy access cluster-wide
+
+This ensures all nodes have identical PGAS installations without requiring each node to compile from source separately.
+
+### UPC++ Quick Start
+
+**Simple Hello World:**
+```cpp
+#include <upcxx/upcxx.hpp>
+#include <iostream>
+
+int main() {
+    upcxx::init();
+    
+    std::cout << "Hello from rank " << upcxx::rank_me() 
+              << " of " << upcxx::rank_n() << std::endl;
+    
+    upcxx::finalize();
+    return 0;
+}
+```
+
+**Compile and Run:**
+```bash
+# Compile UPC++ program
+/home/linuxbrew/.linuxbrew/bin/upcxx -O3 hello.cpp -o hello_upcxx
+
+# Run on single node (SMP conduit)
+/home/linuxbrew/.linuxbrew/bin/upcxx-run -n 4 ./hello_upcxx
+
+# Run across cluster (MPI conduit via SSH)
+/home/linuxbrew/.linuxbrew/bin/upcxx-run -ssh-servers node1,node2,node3 -n 12 ./hello_upcxx
+```
+
+### Available Conduits
+
+1. **SMP Conduit** (default): Single-node shared memory
+   ```bash
+   upcxx-run -n 4 ./program
+   ```
+
+2. **MPI Conduit**: Multi-node via OpenMPI
+   ```bash
+   upcxx-run -ssh-servers 192.168.1.139,192.168.1.96,192.168.1.136 -n 12 ./program
+   ```
+
+3. **UDP Conduit**: Multi-node via UDP sockets (no MPI required)
+   ```bash
+   export GASNET_SPAWNFN=S
+   upcxx-run -n 12 ./program
+   ```
+
+### UPC++ Example: Remote Memory Access
+
+```cpp
+#include <upcxx/upcxx.hpp>
+
+int main() {
+    upcxx::init();
+    
+    // Allocate distributed array
+    upcxx::global_ptr<int> data = nullptr;
+    if (upcxx::rank_me() == 0) {
+        data = upcxx::new_array<int>(100);
+    }
+    
+    // Broadcast pointer to all ranks
+    data = upcxx::broadcast(data, 0).wait();
+    
+    // Remote write to rank 0's memory
+    if (upcxx::rank_me() != 0) {
+        upcxx::rput(upcxx::rank_me(), data + upcxx::rank_me()).wait();
+    }
+    
+    upcxx::barrier();
+    
+    if (upcxx::rank_me() == 0) {
+        upcxx::delete_array(data);
+    }
+    
+    upcxx::finalize();
+    return 0;
+}
+```
+
+### When to Use UPC++ vs MPI
+
+**Use UPC++ when:**
+- You need one-sided communication (remote memory access)
+- Communication patterns are irregular or unpredictable
+- You want asynchronous operations with futures
+- Global data structures simplify your algorithm
+
+**Use MPI when:**
+- Collective operations dominate (allreduce, allgather, etc.)
+- Regular structured communication patterns
+- Maximum portability is required
+- Using existing MPI libraries
+
+**Hybrid Approach:**
+UPC++ can coexist with MPI - use MPI for collectives and UPC++ for irregular communication.
+
+### Performance Considerations
+
+- **SMP conduit**: Best for shared-memory systems, zero-copy operations
+- **MPI conduit**: Leverages existing OpenMPI infrastructure, good for clusters
+- **Network Performance**: GASNet can utilize high-performance networks (10+ Gbps)
+- **Asynchronous Operations**: Use futures to overlap communication and computation
+
+### Troubleshooting UPC++
+
+**Check Installation:**
+```bash
+/home/linuxbrew/.linuxbrew/bin/upcxx --version
+/home/linuxbrew/.linuxbrew/bin/upcxx -show
+```
+
+**Verify Conduits:**
+```bash
+# List available conduits
+/home/linuxbrew/.linuxbrew/bin/upcxx -show 2>&1 | grep -i conduit
+```
+
+**Debug Mode:**
+```bash
+# Compile with debug symbols
+upcxx -g myprogram.cpp -o myprogram
+
+# Run with verbose output
+GASNET_VERBOSEENV=1 upcxx-run -n 4 ./myprogram
+```
 
 ## Architecture
 

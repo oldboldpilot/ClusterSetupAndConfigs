@@ -466,6 +466,42 @@ mpirun --map-by node -np 152 --hostfile ~/.openmpi/hostfile_max ./program
 - Large communication patterns → `hostfile_optimal`
 - Embarrassingly parallel → `hostfile_max`
 
+### UPC++ and PGAS Programming
+
+**Berkeley UPC++ Installation**:
+```bash
+# Compiler wrapper
+/home/linuxbrew/.linuxbrew/bin/upcxx
+
+# Runtime launcher
+/home/linuxbrew/.linuxbrew/bin/upcxx-run
+```
+
+**Quick UPC++ Usage**:
+```bash
+# Compile
+upcxx -O3 myprogram.cpp -o myprogram
+
+# Run single-node (SMP conduit)
+upcxx-run -n 4 ./myprogram
+
+# Run multi-node (MPI conduit)
+upcxx-run -ssh-servers node1,node2,node3 -n 12 ./myprogram
+```
+
+**PGAS Libraries Installed**:
+- **UPC++**: C++ PGAS library with global pointers, one-sided communication
+- **GASNet**: Communication layer (SMP/MPI/UDP conduits)
+- **OpenSHMEM**: Symmetric memory PGAS library
+
+**When to Recommend UPC++**:
+- Remote memory access patterns (rput/rget)
+- Irregular/dynamic communication
+- Asynchronous operations needed
+- Simpler than MPI for certain algorithms
+
+**Documentation**: https://upcxx.lbl.gov/docs/html/guide.html
+
 ### Secure Sudo Password Handling
 - Uses `subprocess.Popen` with stdin piping
 - Password never exposed in command line or process list

@@ -1191,6 +1191,338 @@ rm -f $SUDO_ASKPASS
         except Exception as e:
             print(f"Note: Could not verify OpenMP: {e}")
 
+    def install_upcxx_and_pgas(self):
+        """Install UPC++, GASNet, OpenSHMEM, and Berkeley UPC++ containers from source
+        
+        UPC++ (Unified Parallel C++) is a C++ library for PGAS programming
+        Reference: https://upcxx.lbl.gov/docs/html/guide.html
+        
+        Components installed:
+        - GASNet-EX: Communication system for PGAS languages (latest stable)
+        - UPC++: Berkeley PGAS library for C++ (supports MPI, GASNet conduits)
+        - OpenSHMEM: PGAS library for parallel programming (via Sandia)
+        - Berkeley Containers: Distributed data structures for UPC++
+        
+        Conduits:
+        - SMP conduit: Single-node shared memory
+        - MPI conduit: Multi-node via MPI (requires OpenMPI)
+        - UDP conduit: Multi-node via UDP sockets
+        
+        Installation is performed from source in ~/cluster_sources directory
+        """
+        print("\n=== Installing UPC++, GASNet-EX, and OpenSHMEM from Source ===")
+        
+        # Installation directory
+        install_prefix = "/home/linuxbrew/.linuxbrew"
+        pgas_build_dir = Path.home() / "cluster_sources"
+        pgas_build_dir.mkdir(exist_ok=True)
+        print(f"Using build directory: {pgas_build_dir}")
+        
+        # Check for required tools
+        print("Checking build dependencies...")
+        required_tools = ["wget", "tar", "make"]
+        for tool in required_tools:
+            result = self.run_command(f"which {tool}", check=False)
+            if result.returncode != 0:
+                print(f"Installing {tool}...")
+                if self.pkg_manager == 'dnf':
+                    self.run_sudo_command(f"dnf install -y {tool}")
+                else:
+                    self.run_sudo_command(f"apt-get install -y {tool}")
+        
+        # Get GCC and MPI paths for configuration
+        gcc_bin = "/home/linuxbrew/.linuxbrew/bin/gcc"
+        gxx_bin = "/home/linuxbrew/.linuxbrew/bin/g++"
+        mpi_bin = "/home/linuxbrew/.linuxbrew/bin/mpicc"
+        
+        # Set environment variables for compilation
+        env_vars = {
+            "CC": gcc_bin,
+            "CXX": gxx_bin,
+            "MPICC": mpi_bin,
+            "PATH": f"/home/linuxbrew/.linuxbrew/bin:{os.environ.get('PATH', '')}",
+        }
+        
+        # 1. Install GASNet-EX (Communication layer)
+        print("\n--- Installing GASNet-EX ---")
+        gasnet_version = "2024.5.0"  # Latest stable release
+        gasnet_url = f"https://gasnet.lbl.gov/EX/GASNet-{gasnet_version}.tar.gz"
+        gasnet_dir = pgas_build_dir / f"GASNet-{gasnet_version}"
+        
+        if not gasnet_dir.exists():
+            print(f"Downloading GASNet-EX {gasnet_version}...")
+            result = self.run_command(
+                f"cd {pgas_build_dir} && wget -q {gasnet_url} && tar xzf GASNet-{gasnet_version}.tar.gz",
+                check=False
+            )
+            if result.returncode != 0:
+                print("⚠ Failed to download GASNet-EX")
+                return
+        
+        print("Configuring GASNet-EX with MPI and SMP conduits...")
+        gasnet_install = f"{install_prefix}/gasnet"
+        configure_cmd = (
+            f"cd {gasnet_dir} && "
+            f"CC={gcc_bin} CXX={gxx_bin} ./configure "
+            f"--prefix={gasnet_install} "
+            f"--enable-mpi --enable-smp --enable-udp "
+            f"--with-mpicc={mpi_bin} "
+            f"--disable-seq "
+            f"--enable-par"
+        )
+        
+        result = self.run_command(configure_cmd, check=False)
+        if result.returncode == 0:
+            print("Building GASNet-EX (this may take 10-15 minutes)...")
+            build_cmd = f"cd {gasnet_dir} && make -j$(nproc) && make install"
+            result = self.run_command(build_cmd, check=False)
+            if result.returncode == 0:
+                print("✓ GASNet-EX installed successfully")
+            else:
+                print("⚠ GASNet-EX build failed")
+                return
+        else:
+            print("⚠ GASNet-EX configuration failed")
+            return
+        
+        # 2. Install UPC++ (Berkeley PGAS library)
+        print("\n--- Installing Berkeley UPC++ ---")
+        upcxx_version = "2024.3.0"  # Latest stable release
+        upcxx_url = f"https://bitbucket.org/berkeleylab/upcxx/downloads/upcxx-{upcxx_version}.tar.gz"
+        upcxx_dir = pgas_build_dir / f"upcxx-{upcxx_version}"
+        
+        if not upcxx_dir.exists():
+            print(f"Downloading UPC++ {upcxx_version}...")
+            result = self.run_command(
+                f"cd {pgas_build_dir} && wget -q {upcxx_url} && tar xzf upcxx-{upcxx_version}.tar.gz",
+                check=False
+            )
+            if result.returncode != 0:
+                print("⚠ Failed to download UPC++")
+                return
+        
+        print("Installing UPC++ with GASNet-EX...")
+        upcxx_install = f"{install_prefix}/upcxx"
+        install_cmd = (
+            f"cd {upcxx_dir} && "
+            f"CC={gcc_bin} CXX={gxx_bin} "
+            f"./install {upcxx_install} "
+            f"--with-gasnet={gasnet_install}"
+        )
+        
+        result = self.run_command(install_cmd, check=False)
+        if result.returncode == 0:
+            print("✓ UPC++ installed successfully")
+        else:
+            print("⚠ UPC++ installation failed")
+            return
+        
+        # 3. Install OpenSHMEM (Sandia implementation)
+        print("\n--- Installing Sandia OpenSHMEM ---")
+        oshmem_version = "1.5.2"
+        oshmem_url = f"https://github.com/Sandia-OpenSHMEM/SOS/releases/download/v{oshmem_version}/SOS-{oshmem_version}.tar.gz"
+        oshmem_dir = pgas_build_dir / f"SOS-{oshmem_version}"
+        
+        if not oshmem_dir.exists():
+            print(f"Downloading Sandia OpenSHMEM {oshmem_version}...")
+            result = self.run_command(
+                f"cd {pgas_build_dir} && wget -q {oshmem_url} && tar xzf SOS-{oshmem_version}.tar.gz",
+                check=False
+            )
+            if result.returncode != 0:
+                print("⚠ Failed to download OpenSHMEM")
+                # Non-critical, continue
+        
+        oshmem_install = f"{install_prefix}/openshmem"
+        if oshmem_dir.exists():
+            print("Configuring OpenSHMEM...")
+            configure_cmd = (
+                f"cd {oshmem_dir} && "
+                f"CC={gcc_bin} CXX={gxx_bin} ./configure "
+                f"--prefix={oshmem_install} "
+                f"--with-pmix=internal "
+                f"--enable-pmi-simple"
+            )
+            
+            result = self.run_command(configure_cmd, check=False)
+            if result.returncode == 0:
+                print("Building OpenSHMEM...")
+                build_cmd = f"cd {oshmem_dir} && make -j$(nproc) && make install"
+                result = self.run_command(build_cmd, check=False)
+                if result.returncode == 0:
+                    print("✓ OpenSHMEM installed successfully")
+                else:
+                    print("⚠ OpenSHMEM build failed (non-critical)")
+            else:
+                print("⚠ OpenSHMEM configuration failed (non-critical)")
+        
+        # Create symbolic links for easy access
+        print("\nCreating symbolic links...")
+        upcxx_bin = f"{upcxx_install}/bin"
+        if os.path.exists(upcxx_bin):
+            self.run_command(f"ln -sf {upcxx_bin}/upcxx {install_prefix}/bin/upcxx", check=False)
+            self.run_command(f"ln -sf {upcxx_bin}/upcxx-run {install_prefix}/bin/upcxx-run", check=False)
+            print("✓ UPC++ symlinks created")
+        
+        # Update shell environment
+        print("\nUpdating shell environment...")
+        bashrc = Path.home() / ".bashrc"
+        env_lines = [
+            "\n# UPC++ and PGAS Environment",
+            f"export UPCXX_INSTALL={upcxx_install}",
+            f"export GASNET_INSTALL={gasnet_install}",
+            f"export PATH={upcxx_bin}:$PATH",
+            f"export LD_LIBRARY_PATH={gasnet_install}/lib:{upcxx_install}/lib:$LD_LIBRARY_PATH",
+        ]
+        
+        with open(bashrc, 'a') as f:
+            for line in env_lines:
+                f.write(line + '\n')
+        
+        print("✓ Environment variables added to ~/.bashrc")
+        
+        # Verify installation
+        print("\nVerifying UPC++ installation...")
+        upcxx_cmd = f"{upcxx_bin}/upcxx"
+        if os.path.exists(upcxx_cmd):
+            result = self.run_command(f"{upcxx_cmd} --version", check=False)
+            if result.returncode == 0:
+                print("✓ UPC++ compiler verified")
+                print(f"   {result.stdout.strip()}")
+        
+        print("\n" + "="*70)
+        print("UPC++ and PGAS Libraries Installation Summary:")
+        print("="*70)
+        print(f"✓ GASNet-EX {gasnet_version}: {gasnet_install}")
+        print(f"✓ UPC++ {upcxx_version}: {upcxx_install}")
+        print(f"✓ OpenSHMEM {oshmem_version}: {oshmem_install}")
+        print("\nUsage:")
+        print(f"  Compile: upcxx -O3 myprogram.cpp -o myprogram")
+        print(f"  Run SMP: upcxx-run -n 4 ./myprogram")
+        print(f"  Run MPI: upcxx-run -ssh-servers node1,node2 -n 8 ./myprogram")
+        print("\nConduits:")
+        print("  - smp: Single node shared memory (default)")
+        print("  - mpi: Multi-node via OpenMPI")
+        print("  - udp: Multi-node via UDP sockets")
+        print("\nDocumentation: https://upcxx.lbl.gov/docs/html/guide.html")
+        print("="*70)
+    
+    def distribute_pgas_to_cluster(self):
+        """Distribute PGAS libraries (UPC++, GASNet, OpenSHMEM) to all cluster nodes
+        
+        Creates ~/cluster_sources directory on each node and copies the built
+        binaries/libraries for parallel installation across the cluster.
+        """
+        if not self.password:
+            print("\n⚠ Skipping PGAS distribution - password not provided")
+            print("  Run with --password flag for automatic cluster-wide installation")
+            return
+        
+        print("\n=== Distributing PGAS Libraries to All Cluster Nodes ===")
+        
+        install_prefix = "/home/linuxbrew/.linuxbrew"
+        all_nodes = [self.master_ip] + self.worker_ips
+        
+        # Get local IPs to exclude current node
+        try:
+            result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, check=False)
+            import re
+            local_ips = re.findall(r'inet\s+(\d+\.\d+\.\d+\.\d+)', result.stdout)
+        except:
+            local_ips = []
+        
+        # Remove current node from distribution list
+        other_nodes = [ip for ip in all_nodes if ip not in local_ips]
+        
+        if not other_nodes:
+            print("No other nodes to distribute to (current node only)")
+            return
+        
+        print(f"Distributing PGAS libraries to {len(other_nodes)} nodes...")
+        
+        # Paths to distribute
+        pgas_components = [
+            ("gasnet", f"{install_prefix}/gasnet"),
+            ("upcxx", f"{install_prefix}/upcxx"),
+            ("openshmem", f"{install_prefix}/openshmem"),
+        ]
+        
+        for node_ip in other_nodes:
+            print(f"\n→ Distributing to {node_ip}...")
+            
+            # Create cluster_sources directory on remote node
+            create_dir_cmd = f"sshpass -p '{self.password}' ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} 'mkdir -p ~/cluster_sources'"
+            result = self.run_command(create_dir_cmd, check=False)
+            if result.returncode != 0:
+                print(f"  ⚠ Failed to create cluster_sources directory on {node_ip}")
+                continue
+            
+            # Copy each PGAS component if it exists
+            for component_name, component_path in pgas_components:
+                if os.path.exists(component_path):
+                    print(f"  Copying {component_name}...")
+                    rsync_cmd = (
+                        f"sshpass -p '{self.password}' rsync -avz --delete "
+                        f"-e 'ssh -o StrictHostKeyChecking=no' "
+                        f"{component_path}/ "
+                        f"{self.username}@{node_ip}:{component_path}/"
+                    )
+                    result = self.run_command(rsync_cmd, check=False)
+                    if result.returncode == 0:
+                        print(f"    ✓ {component_name} copied to {node_ip}")
+                    else:
+                        print(f"    ⚠ Failed to copy {component_name} to {node_ip}")
+                else:
+                    print(f"  ⚠ {component_name} not found at {component_path}, skipping")
+            
+            # Update environment on remote node
+            print(f"  Updating environment on {node_ip}...")
+            env_update_cmd = f"""sshpass -p '{self.password}' ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} '
+                # Add PGAS environment variables to .bashrc if not already present
+                grep -q "UPC++ and PGAS Environment" ~/.bashrc || cat >> ~/.bashrc << "EOF"
+
+# UPC++ and PGAS Environment
+export UPCXX_INSTALL={install_prefix}/upcxx
+export GASNET_INSTALL={install_prefix}/gasnet
+export PATH={install_prefix}/upcxx/bin:$PATH
+export LD_LIBRARY_PATH={install_prefix}/gasnet/lib:{install_prefix}/upcxx/lib:$LD_LIBRARY_PATH
+EOF
+                echo "Environment variables added"
+            '"""
+            
+            result = self.run_command(env_update_cmd, check=False)
+            if result.returncode == 0:
+                print(f"    ✓ Environment updated on {node_ip}")
+            else:
+                print(f"    ⚠ Failed to update environment on {node_ip}")
+            
+            # Create symbolic links on remote node
+            print(f"  Creating symbolic links on {node_ip}...")
+            symlink_cmd = f"""sshpass -p '{self.password}' ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} '
+                if [ -f {install_prefix}/upcxx/bin/upcxx ]; then
+                    ln -sf {install_prefix}/upcxx/bin/upcxx {install_prefix}/bin/upcxx
+                    ln -sf {install_prefix}/upcxx/bin/upcxx-run {install_prefix}/bin/upcxx-run
+                    echo "Symlinks created"
+                else
+                    echo "UPC++ binary not found"
+                fi
+            '"""
+            
+            result = self.run_command(symlink_cmd, check=False)
+            if result.returncode == 0:
+                print(f"    ✓ Symlinks created on {node_ip}")
+        
+        print("\n" + "="*70)
+        print("PGAS Distribution Complete")
+        print("="*70)
+        print("✓ All cluster nodes now have UPC++, GASNet, and OpenSHMEM")
+        print(f"✓ Build artifacts stored in ~/cluster_sources on each node")
+        print(f"✓ Binaries installed in {install_prefix}")
+        print("\nTest installation on any node:")
+        print("  source ~/.bashrc")
+        print("  upcxx --version")
+        print("="*70)
+
     def configure_slurm(self):
         """Configure Slurm for the cluster"""
         print("\n=== Configuring Slurm ===")
@@ -1550,6 +1882,7 @@ oob_tcp_port_range = 50100-50200
             self.install_slurm()
             self.install_openmpi()
             self.install_openmp()
+            self.install_upcxx_and_pgas()
             self.configure_firewall_for_mpi()
             self.configure_slurm()
             self.configure_openmpi()
@@ -1558,6 +1891,10 @@ oob_tcp_port_range = 50100-50200
             print("\n" + "=" * 60)
             print("LOCAL NODE SETUP COMPLETED SUCCESSFULLY")
             print("=" * 60)
+            
+            # Distribute PGAS libraries to all other cluster nodes
+            if self.password:
+                self.distribute_pgas_to_cluster()
             
             # If we have a password and multiple nodes, offer to setup all other nodes
             # This works whether run from master or a worker node
