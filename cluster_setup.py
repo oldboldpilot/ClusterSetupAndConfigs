@@ -1064,10 +1064,9 @@ rm -f $SUDO_ASKPASS
         else:
             print("CMake installation failed or already installed")
         
-        # Create symlinks for OpenMPI compatibility
-        # OpenMPI's prebuilt bottles are compiled to use gcc-11, but Homebrew installs gcc-15
-        # Create symlinks so mpicc can find the compiler
-        print("Creating compiler symlinks for OpenMPI compatibility...")
+        # Create symlinks to make Homebrew GCC the default compiler
+        # This ensures we use the latest GCC from Homebrew instead of system GCC
+        print("Creating compiler symlinks to make Homebrew GCC default...")
         homebrew_bin = "/home/linuxbrew/.linuxbrew/bin"
         
         # Find the installed gcc version
@@ -1077,11 +1076,19 @@ rm -f $SUDO_ASKPASS
             gcc_version = gcc_path.split('-')[-1]
             print(f"Found GCC version: {gcc_version}")
             
-            # Create gcc-11 and g++-11 symlinks pointing to the actual gcc version
+            # Create default gcc/g++/gfortran symlinks pointing to Homebrew's latest version
+            self.run_command(f"ln -sf {homebrew_bin}/gcc-{gcc_version} {homebrew_bin}/gcc", check=False)
+            self.run_command(f"ln -sf {homebrew_bin}/g++-{gcc_version} {homebrew_bin}/g++", check=False)
+            self.run_command(f"ln -sf {homebrew_bin}/gfortran-{gcc_version} {homebrew_bin}/gfortran", check=False)
+            
+            # Also create gcc-11 symlinks for OpenMPI compatibility (prebuilt bottles expect gcc-11)
             self.run_command(f"ln -sf {homebrew_bin}/gcc-{gcc_version} {homebrew_bin}/gcc-11", check=False)
             self.run_command(f"ln -sf {homebrew_bin}/g++-{gcc_version} {homebrew_bin}/g++-11", check=False)
             self.run_command(f"ln -sf {homebrew_bin}/gfortran-{gcc_version} {homebrew_bin}/gfortran-11", check=False)
-            print(f"✓ Created compiler symlinks: gcc-11 -> gcc-{gcc_version}")
+            
+            print(f"✓ Created compiler symlinks:")
+            print(f"  gcc/g++/gfortran -> gcc-{gcc_version} (default)")
+            print(f"  gcc-11 -> gcc-{gcc_version} (OpenMPI compatibility)")
         else:
             print("⚠️  Could not detect GCC version for symlink creation")
         

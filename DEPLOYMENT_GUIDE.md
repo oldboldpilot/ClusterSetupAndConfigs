@@ -32,10 +32,10 @@ The script automatically detects which node it's running on by checking all loca
 5. Sets up all other nodes automatically
 
 **Example:**
-- Cluster: master=192.168.1.147, workers=[192.168.1.139, 192.168.1.96, 192.168.1.136]
-- You run from worker 192.168.1.136
-- Script detects: "I'm worker 136"
-- Script sets up: 192.168.1.147 (master), 192.168.1.139 (worker), 192.168.1.96 (worker)
+- Cluster: master=10.0.0.10, workers=[10.0.0.11, 10.0.0.12, 10.0.0.13]
+- You run from worker 10.0.0.13
+- Script detects: "I'm worker 13"
+- Script sets up: 10.0.0.10 (master), 10.0.0.11 (worker), 10.0.0.12 (worker)
 
 ### 2. Multi-OS Support
 
@@ -58,8 +58,8 @@ ip addr show | grep "inet "
 
 # Example output:
 #   inet 127.0.0.1/8 scope host lo
-#   inet 192.168.1.136/24 brd 192.168.1.255 scope global eth0
-#   inet 192.168.1.138/24 brd 192.168.1.255 scope global eth1
+#   inet 10.0.0.13/24 brd 10.0.0.255 scope global eth0
+#   inet 10.0.0.15/24 brd 10.0.0.255 scope global eth1
 ```
 
 The script will automatically detect your node, but this is useful for verification.
@@ -369,7 +369,7 @@ cat ~/.openmpi/mca-params.conf
 Expected configuration (automatically created by script):
 ```
 btl = ^openib
-btl_tcp_if_include = 192.168.1.0/24  # Your network range
+btl_tcp_if_include = 10.0.0.0/24  # Your network range
 
 # Port configuration for firewall-friendly operation
 btl_tcp_port_min_v4 = 50000
@@ -429,7 +429,7 @@ If PRRTE-based MPI continues to hang:
 **Option 1: Use pdsh for parallel execution** (Recommended for embarrassingly parallel tasks)
 ```bash
 brew install pdsh
-pdsh -w 192.168.1.[147,137,96] hostname
+pdsh -w 10.0.0.[10,11,12] hostname
 pdsh -w worker[1-2] 'python3 my_script.py'
 ```
 

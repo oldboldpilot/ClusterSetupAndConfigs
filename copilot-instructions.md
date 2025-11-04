@@ -408,7 +408,7 @@ oob_tcp_if_include = ens1f0  # For multi-NIC nodes
 - **Performance**: ALWAYS bias towards highest throughput interface
 ```bash
 # Detect multi-interface nodes
-ip addr show | grep "inet 192.168.1"
+ip addr show | grep "inet 10.0.0"
 
 # Check interface speeds - choose fastest for MPI
 ethtool ens1f0 | grep Speed  # 10000Mb/s (10 Gbps)
@@ -515,7 +515,7 @@ ip addr show | grep "inet "
 # Script outputs:
 # DEBUG: hostname='...', local_ip='...', master_ip='...'
 # DEBUG: Found IPs on interfaces: [...]
-# Current node is: MASTER or WORKER (192.168.1.X)
+# Current node is: MASTER or WORKER (10.0.0.X)
 # Will setup these other nodes: [...]
 ```
 

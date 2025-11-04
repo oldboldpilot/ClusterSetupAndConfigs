@@ -115,10 +115,10 @@ ip addr show | grep "inet "
 ```
 
 **Example:**
-- Your cluster: master=192.168.1.147, workers=[192.168.1.139, 192.168.1.96, 192.168.1.136]
-- You SSH to worker 192.168.1.136 and run the script
-- Script detects: "I'm on worker 136"
-- Script will setup: master 192.168.1.147, worker 139, worker 96 (all nodes EXCEPT 136)
+- Your cluster: master=10.0.0.10, workers=[10.0.0.11, 10.0.0.12, 10.0.0.13]
+- You SSH to worker 10.0.0.13 and run the script
+- Script detects: "I'm on worker 13"
+- Script will setup: master 10.0.0.10, worker 11, worker 12 (all nodes EXCEPT 13)
 
 If you encounter issues with uv on WSL:
 
@@ -389,7 +389,7 @@ mpirun -np 2 hostname
 
 # Test parallel execution across cluster with pdsh
 brew install pdsh
-pdsh -w 192.168.1.[147,137,96] hostname
+pdsh -w 10.0.0.[10,11,12] hostname
 ```
 
 ## What the Script Does
@@ -527,10 +527,10 @@ The setup script automatically creates **three different hostfiles** for differe
 #### 1. `~/.openmpi/hostfile` - Standard (4 slots per node)
 For running multiple MPI processes per node:
 ```
-192.168.1.139 slots=4
-192.168.1.96 slots=4
-192.168.1.136 slots=4
-192.168.1.147 slots=4
+10.0.0.11 slots=4
+10.0.0.12 slots=4
+10.0.0.13 slots=4
+10.0.0.10 slots=4
 ```
 
 **Usage:**
@@ -542,10 +542,10 @@ mpirun --map-by node -np 12 --hostfile ~/.openmpi/hostfile ./my_program
 #### 2. `~/.openmpi/hostfile_optimal` - Optimal (1 slot per node) ⭐ **RECOMMENDED**
 For optimal MPI+OpenMP hybrid parallelism:
 ```
-192.168.1.139 slots=1
-192.168.1.96 slots=1
-192.168.1.136 slots=1
-192.168.1.147 slots=1
+10.0.0.11 slots=1
+10.0.0.12 slots=1
+10.0.0.13 slots=1
+10.0.0.10 slots=1
 ```
 
 **Usage:**
@@ -566,10 +566,10 @@ mpirun --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./my_program
 #### 3. `~/.openmpi/hostfile_max` - Maximum (auto-detected cores per node)
 For maximum MPI parallelism (cores detected automatically):
 ```
-192.168.1.139 slots=16
-192.168.1.96 slots=16
-192.168.1.136 slots=88
-192.168.1.147 slots=32
+10.0.0.11 slots=16
+10.0.0.12 slots=16
+10.0.0.13 slots=88
+10.0.0.10 slots=32
 ```
 
 **Usage:**
@@ -691,10 +691,10 @@ For a 4-node cluster with varying core counts:
 ```bash
 # Create hostfile with 1 slot per node
 cat > hostfile << EOF
-192.168.1.139 slots=1
-192.168.1.96 slots=1
-192.168.1.136 slots=1
-192.168.1.147 slots=1
+10.0.0.11 slots=1
+10.0.0.12 slots=1
+10.0.0.13 slots=1
+10.0.0.10 slots=1
 EOF
 
 # Run with 1 MPI process per node, max OpenMP threads
@@ -709,10 +709,10 @@ mpirun --map-by node \
 
 # For per-node thread control:
 mpirun --map-by node -np 4 --hostfile hostfile \
-       --host 192.168.1.139 -x OMP_NUM_THREADS=32 : \
-       --host 192.168.1.96 -x OMP_NUM_THREADS=32 : \
-       --host 192.168.1.136 -x OMP_NUM_THREADS=88 : \
-       --host 192.168.1.147 -x OMP_NUM_THREADS=32 \
+       --host 10.0.0.11 -x OMP_NUM_THREADS=32 : \
+       --host 10.0.0.12 -x OMP_NUM_THREADS=32 : \
+       --host 10.0.0.13 -x OMP_NUM_THREADS=88 : \
+       --host 10.0.0.10 -x OMP_NUM_THREADS=32 \
        ./my_hybrid_program
 ```
 
@@ -724,10 +724,10 @@ mpirun --map-by node -np 4 --hostfile hostfile \
 ```bash
 # Example: 2 MPI processes per node, half threads each
 cat > hostfile << EOF
-192.168.1.139 slots=2
-192.168.1.96 slots=2
-192.168.1.136 slots=2
-192.168.1.147 slots=2
+10.0.0.11 slots=2
+10.0.0.12 slots=2
+10.0.0.13 slots=2
+10.0.0.10 slots=2
 EOF
 
 export OMP_NUM_THREADS=16  # Half the cores for each MPI process
@@ -919,8 +919,8 @@ brew link open-mpi
 ip addr show | grep "inet " | grep -v 127.0.0.1
 
 # Example problematic output:
-#   inet 192.168.1.136/24 ... ens1f0
-#   inet 192.168.1.138/24 ... ens1f1  <- Multiple IPs on same subnet!
+#   inet 10.0.0.13/24 ... ens1f0
+#   inet 10.0.0.15/24 ... ens1f1  <- Multiple IPs on same subnet!
 ```
 
 **Solution**:
@@ -932,8 +932,8 @@ oob_tcp_if_include = ens1f0  # Use your primary interface name
 btl_tcp_if_include = ens1f0
 
 # Or use IP/netmask notation:
-oob_tcp_if_include = 192.168.1.136/32  # Specific IP
-btl_tcp_if_include = 192.168.1.136/32
+oob_tcp_if_include = 10.0.0.13/32  # Specific IP
+btl_tcp_if_include = 10.0.0.13/32
 ```
 
 Find your primary interface:
@@ -942,7 +942,7 @@ Find your primary interface:
 ip route show default
 
 # Output example:
-# default via 192.168.1.1 dev ens1f0 proto dhcp src 192.168.1.136 metric 100
+# default via 10.0.0.1 dev ens1f0 proto dhcp src 10.0.0.13 metric 100
 #                               ^^^^^^ This is your primary interface
 
 # Check interface speeds to choose highest throughput
@@ -975,11 +975,11 @@ The setup script (as of November 2025) automatically:
 
 When running with `--password`, you'll see:
 ```
-Detecting all IP addresses on 192.168.1.136...
-  Found IPs: 192.168.1.136, 192.168.1.138
-Distributing 192.168.1.139's key to 192.168.1.136 (all 2 IP(s))...
-  ✓ Added 192.168.1.139's key to 192.168.1.136
-    This key will work for all IPs: 192.168.1.136, 192.168.1.138
+Detecting all IP addresses on 10.0.0.13...
+  Found IPs: 10.0.0.13, 10.0.0.15
+Distributing 10.0.0.11's key to 10.0.0.13 (all 2 IP(s))...
+  ✓ Added 10.0.0.11's key to 10.0.0.13
+    This key will work for all IPs: 10.0.0.13, 10.0.0.15
 ```
 
 **Note**: While SSH keys are distributed for all IPs, you still need to configure MCA parameters to specify which interface OpenMPI should use for communication.
@@ -1059,7 +1059,7 @@ The cluster setup script automatically detects WSL and displays these instructio
 **Network Interface Configuration Fixed**: The script originally hardcoded `btl_tcp_if_include = eth0`, but:
 - eth0 is often DOWN on many systems
 - The actual cluster network is typically on eth1 or other interfaces
-- **Solution**: Script now auto-detects the correct network interface and uses IP ranges (e.g., `192.168.1.0/24`) instead of interface names for better reliability
+- **Solution**: Script now auto-detects the correct network interface and uses IP ranges (e.g., `10.0.0.0/24`) instead of interface names for better reliability
 
 **Workaround - Use pdsh for Parallel Execution**:
 
@@ -1068,13 +1068,13 @@ The cluster setup script automatically detects WSL and displays these instructio
 brew install pdsh
 
 # Run commands across all nodes
-pdsh -w 192.168.1.[147,137,96] hostname
+pdsh -w 10.0.0.[10,11,12] hostname
 
 # Execute Python scripts in parallel
-pdsh -w 192.168.1.[147,137,96] 'python3 /path/to/script.py'
+pdsh -w 10.0.0.[10,11,12] 'python3 /path/to/script.py'
 
 # Run with custom SSH options
-pdsh -R exec -w 192.168.1.[137,96] command
+pdsh -R exec -w 10.0.0.[11,12] command
 ```
 
 **pdsh Benefits**:

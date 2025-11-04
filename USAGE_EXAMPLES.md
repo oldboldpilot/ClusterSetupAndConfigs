@@ -10,18 +10,18 @@
 # Check your local IP addresses
 ip addr show | grep "inet "
 
-# Example output on worker node 192.168.1.136:
+# Example output on worker node 10.0.0.13:
 #   inet 127.0.0.1/8 scope host lo
-#   inet 192.168.1.136/24 brd 192.168.1.255 scope global eth0
-#   inet 192.168.1.138/24 brd 192.168.1.255 scope global eth1
+#   inet 10.0.0.13/24 brd 10.0.0.255 scope global eth0
+#   inet 10.0.0.15/24 brd 10.0.0.255 scope global eth1
 ```
 
 When you run the script, it will show:
 ```
-DEBUG: hostname='worker-node', local_ip='192.168.1.138', master_ip='192.168.1.147'
-DEBUG: Found IPs on interfaces: ['127.0.0.1', '192.168.1.136', '192.168.1.138']
-Current node is: WORKER (192.168.1.136)
-Will setup these other nodes: ['192.168.1.147', '192.168.1.139', '192.168.1.96']
+DEBUG: hostname='worker-node', local_ip='10.0.0.15', master_ip='10.0.0.10'
+DEBUG: Found IPs on interfaces: ['127.0.0.1', '10.0.0.13', '10.0.0.15']
+Current node is: WORKER (10.0.0.13)
+Will setup these other nodes: ['10.0.0.10', '10.0.0.11', '10.0.0.12']
               ← Script detects it's on worker and will setup master + other workers
 ```
 
