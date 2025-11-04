@@ -4,8 +4,8 @@ Cluster Setup and Configuration Modules
 Modular components for HPC cluster setup, configuration, and management.
 """
 
-__version__ = "2.0.0"
-__author__ = "Cluster Setup Team"
+__version__ = "3.0.0"
+__author__ = "Olumuyiwa Oluwasanmi"
 
 # Core modules
 from .homebrew_manager import HomebrewManager
@@ -15,6 +15,7 @@ from .mpi_manager import MPIManager
 from .openmp_manager import OpenMPManager
 from .openshmem_manager import OpenSHMEMManager
 from .berkeley_upc_manager import BerkeleyUPCManager
+from .pgas_manager import PGASManager
 from .benchmark_manager import BenchmarkManager
 from .slurm_manager import SlurmManager
 from .network_manager import NetworkManager
@@ -28,6 +29,7 @@ __all__ = [
     'OpenMPManager',
     'OpenSHMEMManager',
     'BerkeleyUPCManager',
+    'PGASManager',
     'BenchmarkManager',
     'SlurmManager',
     'NetworkManager',

@@ -55,19 +55,9 @@ class SudoManager:
         """
         print("→ Configuring passwordless sudo on local node...")
         
-        # Commands that need passwordless sudo
-        commands = [
-            '/usr/bin/ln', '/bin/ln',
-            '/usr/bin/rsync', '/bin/rsync',
-            '/usr/bin/systemctl', '/bin/systemctl',
-            '/usr/bin/mkdir', '/bin/mkdir',
-            '/usr/bin/chmod', '/bin/chmod',
-            '/usr/bin/chown', '/bin/chown',
-            '/usr/bin/tee', '/bin/tee',
-            '/usr/bin/cp', '/bin/cp',
-        ]
-        
-        sudoers_content = f"{self.username} ALL=(ALL) NOPASSWD: {', '.join(commands)}"
+        # Grant full passwordless sudo for cluster operations
+        # Using ALL to avoid missing any needed commands
+        sudoers_content = f"{self.username} ALL=(ALL) NOPASSWD: ALL"
         
         try:
             # Create temporary file

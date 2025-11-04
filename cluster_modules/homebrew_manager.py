@@ -251,8 +251,9 @@ class HomebrewManager:
         # Update sshd_config to permit environment variables
         sshd_config = Path("/etc/ssh/sshd_config")
         if sshd_config.exists():
-            with open(sshd_config, 'r') as f:
-                config_content = f.read()
+            # Use sudo to read sshd_config
+            result = self._run_command("sudo cat /etc/ssh/sshd_config", check=False)
+            config_content = result.stdout if result.returncode == 0 else ""
             
             if "PermitUserEnvironment" not in config_content:
                 print("Adding PermitUserEnvironment to sshd_config...")
