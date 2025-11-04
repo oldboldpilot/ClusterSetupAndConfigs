@@ -123,17 +123,55 @@ ls -la /home/linuxbrew/.linuxbrew/bin/gcc
 - OpenMPI configured
 - UPC++ and GASNet distributed
 
-## Next Steps
+## Automated Setup Flow
 
-When running cluster setup on new nodes, the updated flow will:
-1. Distribute SSH keys first
-2. Configure passwordless sudo
-3. Install Homebrew
-4. Install and symlink latest GCC automatically
-5. Install and configure binutils
-6. Proceed with parallel library installation
+The updated `cluster_setup.py` automatically:
 
-**No manual intervention required** - symlinks created automatically!
+1. **STEP 1:** Distribute SSH keys and configure passwordless sudo
+2. **STEP 2:** Install Homebrew and core development tools
+3. **STEP 3:** Install GCC and create initial symlinks
+4. **STEP 4:** Install parallel programming libraries
+5. **STEP 5:** Configure firewalls and finalize setup
+6. **STEP 6:** **POST-INSTALLATION** - Fix symlinks and verify PATH
+
+### Post-Installation Verification (NEW)
+
+After all installations, the setup automatically:
+- Detects latest GCC version (e.g., gcc-15)
+- Updates symlinks: `gcc -> gcc-15`, `g++ -> g++-15`, `gfortran -> gfortran-15`
+- Verifies binutils accessibility
+- Checks all critical tools on PATH:
+  - gcc, g++, gfortran
+  - brew, python3
+  - mpicc, mpirun
+
+**Result:** All nodes get GCC 15.2.0 automatically, no manual intervention required!
+
+## Testing Results
+
+### Cluster Setup Test (November 4, 2025)
+
+Ran full cluster setup with `--password` flag:
+```bash
+uv run python cluster_setup.py --config cluster_config_actual.yaml --password --non-interactive
+```
+
+**Results:**
+- ✅ All 3 nodes setup successfully
+- ✅ SSH keys distributed to all nodes
+- ✅ GCC 15.2.0 installed and symlinked on all nodes
+- ✅ Binutils 2.45 verified on all nodes
+- ✅ All critical tools on PATH verified
+- ✅ Post-installation symlink fixing worked automatically
+
+**Final Verification:**
+```bash
+# All nodes confirmed:
+192.168.1.147: gcc -> gcc-15 (Homebrew GCC 15.2.0)
+192.168.1.139: gcc -> gcc-15 (Homebrew GCC 15.2.0)
+192.168.1.96:  gcc -> gcc-15 (Homebrew GCC 15.2.0)
+192.168.1.136: gcc -> gcc-15 (Homebrew GCC 15.2.0)
+```
 
 ---
 

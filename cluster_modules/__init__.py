@@ -8,6 +8,7 @@ __version__ = "2.0.0"
 __author__ = "Cluster Setup Team"
 
 # Core modules
+from .homebrew_manager import HomebrewManager
 from .ssh_manager import SSHManager
 from .sudo_manager import SudoManager
 from .mpi_manager import MPIManager
@@ -20,6 +21,7 @@ from .network_manager import NetworkManager
 from .pdsh_manager import PDSHManager
 
 __all__ = [
+    'HomebrewManager',
     'SSHManager',
     'SudoManager',
     'MPIManager',
