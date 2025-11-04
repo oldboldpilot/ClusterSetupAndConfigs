@@ -524,7 +524,7 @@ def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
         description="Streamlined Modular Cluster Setup Script",
-        epilog="Example: python cluster_setup.py --config cluster_config.yaml --password"
+        epilog="Example: python cluster_setup.py --config cluster_config.yaml --password --run-benchmarks"
     )
     parser.add_argument('--config', '-c', required=True,
                        help='Path to YAML config file')
@@ -532,6 +532,10 @@ def main():
                        help='Prompt for password to setup entire cluster')
     parser.add_argument('--non-interactive', action='store_true',
                        help='Run in non-interactive mode')
+    parser.add_argument('--run-benchmarks', '-r', action='store_true',
+                       help='Run all benchmarks on cluster nodes after setup completes')
+    parser.add_argument('--clean-install', action='store_true',
+                       help='Remove all existing configs/keys/benchmarks before setup (fresh install)')
     
     args = parser.parse_args()
     
@@ -564,9 +568,89 @@ def main():
         print("Error: Config must contain 'master' and 'workers'")
         sys.exit(1)
     
+    # Perform clean install if requested
+    if args.clean_install:
+        print("\n" + "="*70)
+        print("CLEAN INSTALL REQUESTED")
+        print("="*70)
+        print("\nThis will remove:")
+        print("  - All benchmarks and build directories")
+        print("  - SSH keys (id_rsa, id_ed25519)")
+        print("  - OpenMPI and pdsh hostfiles")
+        print("  - GCC compatibility symlinks")
+        print("  - System binutils symlinks")
+        
+        if not args.non_interactive:
+            response = input("\nAre you sure you want to continue? (yes/no): ")
+            if response.lower() not in ['yes', 'y']:
+                print("Clean install cancelled")
+                sys.exit(0)
+        
+        # Create temporary BenchmarkManager just for clean install
+        from cluster_modules.benchmark_manager import BenchmarkManager
+        temp_benchmark_mgr = BenchmarkManager(
+            username=username,
+            password=password or "",
+            master_ip=master,
+            worker_ips=workers
+        )
+        
+        if not temp_benchmark_mgr.clean_install():
+            print("\n✗ Clean install failed")
+            sys.exit(1)
+        
+        print("\n✓ Clean install completed - proceeding with fresh setup\n")
+    
     # Run setup
     setup = ClusterSetup(master, workers, username, password)
     setup.run_full_setup(config_file=args.config, non_interactive=args.non_interactive)
+    
+    # Run benchmarks if requested
+    if args.run_benchmarks:
+        print("\n" + "="*70)
+        print("RUNNING BENCHMARKS ON CLUSTER")
+        print("="*70)
+        
+        # Create BenchmarkManager with correct benchmark directory
+        from cluster_modules.benchmark_manager import BenchmarkManager
+        from pathlib import Path
+        benchmark_dir = Path.home() / "cluster_build_sources" / "benchmarks"
+        
+        benchmark_mgr = BenchmarkManager(
+            username=username,
+            password=password or "",
+            master_ip=master,
+            worker_ips=workers,
+            benchmark_dir=benchmark_dir
+        )
+        
+        # First, ensure benchmarks are compiled
+        print("\n→ Compiling benchmarks...")
+        compile_result = benchmark_mgr.compile_benchmarks()
+        
+        if compile_result:
+            print("✓ Benchmarks compiled successfully")
+            
+            # Distribute to all nodes
+            print("\n→ Distributing benchmarks to all nodes...")
+            if benchmark_mgr.distribute_benchmarks_pdsh():
+                print("✓ Benchmarks distributed successfully")
+                
+                # Run benchmarks on all nodes
+                results = benchmark_mgr.run_benchmarks_on_all_nodes()
+                
+                # Print final summary
+                successful = sum(1 for v in results.values() if v)
+                total = len(results)
+                
+                if successful == total:
+                    print(f"\n✓ All benchmarks completed successfully ({successful}/{total})")
+                else:
+                    print(f"\n⚠️  Some benchmarks failed ({successful}/{total} successful)")
+            else:
+                print("\n✗ Failed to distribute benchmarks")
+        else:
+            print("\n✗ Failed to compile benchmarks")
 
 
 if __name__ == '__main__':

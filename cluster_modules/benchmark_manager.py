@@ -329,14 +329,13 @@ class BenchmarkManager:
         """
         print("\n=== Creating Makefile ===")
         
-        # Default configuration with full paths for MPI
-        ompi_prefix = '/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8'
+        # Default configuration
         default_config = {
-            'upcxx_compiler': '/home/linuxbrew/.linuxbrew/bin/upcxx',
-            'mpi_compiler': f'{ompi_prefix}/bin/mpicxx',
-            'openshmem_compiler': '/home/linuxbrew/.linuxbrew/bin/oshcc',
-            'berkeley_upc_compiler': '/home/linuxbrew/.linuxbrew/bin/upcc',
-            'cxx_compiler': '/home/linuxbrew/.linuxbrew/bin/g++',
+            'upcxx_compiler': 'upcxx',
+            'mpi_compiler': 'mpicxx',
+            'openshmem_compiler': 'oshcc',
+            'berkeley_upc_compiler': 'upcc',
+            'cxx_compiler': 'g++',
             'upcxx_flags': '-std=c++23 -O3',
             'mpi_flags': '-std=c++23 -O3',
             'openshmem_flags': '-std=c++23 -O3',
@@ -446,57 +445,36 @@ class BenchmarkManager:
         
         return success
     
-    def compile_benchmarks(self, targets: Optional[List[str]] = None) -> bool:
+    def compile_benchmarks(self) -> bool:
         """
-        Compile benchmarks using the generated Makefile.
-
-        Args:
-            targets: Optional list of specific targets to compile (e.g., ['mpi_latency', 'hybrid_mpi_openmp'])
-                    If None, compiles all benchmarks
-
+        Compile all benchmarks using the generated Makefile.
+        
         Returns:
             bool: True if compilation successful, False otherwise
         """
         print("\n=== Compiling Benchmarks ===")
-
+        
         makefile_path = self.benchmark_dir / "Makefile"
         if not makefile_path.exists():
             print(f"✗ Makefile not found: {makefile_path}")
             return False
-
-        # Determine targets
-        if targets is None:
-            print("  Compiling all benchmarks")
-        else:
-            print(f"  Compiling specific targets: {', '.join(targets)}")
-
+        
         try:
-            # Clean first
-            subprocess.run(
-                ['make', '-C', str(self.benchmark_dir), 'clean'],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-
-            # Compile
             result = subprocess.run(
-                ['make', '-C', str(self.benchmark_dir)] + (targets if targets else ['all']),
+                ['make', '-C', str(self.benchmark_dir), 'all'],
                 capture_output=True,
                 text=True,
                 timeout=300
             )
-
+            
             if result.returncode == 0:
                 print("✓ Benchmarks compiled successfully")
-                if result.stdout:
-                    print(f"  Output: {result.stdout[:200]}...")
                 return True
             else:
                 print(f"✗ Compilation failed:")
-                print(result.stderr[-1000:] if len(result.stderr) > 1000 else result.stderr)
+                print(result.stderr)
                 return False
-
+                
         except subprocess.TimeoutExpired:
             print("✗ Compilation timed out")
             return False
@@ -506,8 +484,8 @@ class BenchmarkManager:
     
     def distribute_benchmarks_pdsh(self) -> bool:
         """
-        Distribute compiled benchmarks to all cluster nodes using pdsh.
-        Falls back to sequential distribution if pdsh is not available.
+        Distribute compiled benchmarks to all cluster nodes using rsync.
+        Uses sequential distribution for reliability.
         
         Returns:
             bool: True if distribution successful, False otherwise
@@ -528,15 +506,9 @@ class BenchmarkManager:
             print("✓ Running on single node, no distribution needed")
             return True
         
-        # Try pdsh first
-        pdsh_available = subprocess.run(['which', 'pdsh'], 
-                                       capture_output=True).returncode == 0
-        
-        if pdsh_available:
-            return self._distribute_with_pdsh(target_ips)
-        else:
-            print("⚠ pdsh not available, using sequential distribution")
-            return self._distribute_sequential(target_ips)
+        # Use sequential distribution (reliable and tested)
+        print(f"Distributing benchmarks to {len(target_ips)} nodes using rsync...")
+        return self._distribute_sequential(target_ips)
     
     def _distribute_with_pdsh(self, target_ips: List[str]) -> bool:
         """
@@ -613,7 +585,7 @@ class BenchmarkManager:
     def _get_local_ip(self) -> Optional[str]:
         """
         Get the local machine's IP address.
-
+        
         Returns:
             Optional[str]: Local IP address or None if not found
         """
@@ -626,103 +598,161 @@ class BenchmarkManager:
         except:
             pass
         return None
-
-    def run_mpi_benchmark_cluster(self, benchmark_name: str, num_procs: int = 4,
-                                   hostfile: str = "~/.openmpi/hostfile_optimal") -> bool:
+    
+    def run_benchmarks_on_all_nodes(self, benchmark_names: Optional[List[str]] = None) -> Dict[str, bool]:
         """
-        Run an MPI benchmark across the entire cluster.
-
+        Run benchmarks on all cluster nodes using pdsh.
+        
         Args:
-            benchmark_name: Name of the benchmark to run (e.g., 'mpi_latency', 'hybrid_mpi_openmp')
-            num_procs: Number of MPI processes to launch
-            hostfile: Path to MPI hostfile
-
+            benchmark_names: List of benchmark names to run (None = all available)
+            
         Returns:
-            bool: True if execution successful, False otherwise
-        """
-        print(f"\n=== Running {benchmark_name} Benchmark on Cluster ===")
-
-        # Expand hostfile path
-        import os
-        hostfile = os.path.expanduser(hostfile)
-
-        # Check if benchmark exists
-        benchmark_path = self.benchmark_dir / "bin" / benchmark_name
-        if not benchmark_path.exists():
-            print(f"✗ Benchmark not found: {benchmark_path}")
-            print("  Run compile_benchmarks() first")
-            return False
-
-        # MPI execution with proper flags
-        ompi_prefix = '/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8'
-        cmd = [
-            f'{ompi_prefix}/bin/mpirun',
-            '--prefix', ompi_prefix,
-            '--map-by', 'node',
-            '-np', str(num_procs),
-            '--hostfile', hostfile,
-            str(benchmark_path)
-        ]
-
-        print(f"Command: {' '.join(cmd)}")
-        print(f"Processes: {num_procs}")
-        print(f"Hostfile: {hostfile}")
-        print(f"{'='*70}")
-
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=False,  # Show output in real-time
-                text=True,
-                timeout=300
-            )
-
-            if result.returncode == 0:
-                print(f"{'='*70}")
-                print(f"✓ {benchmark_name} completed successfully")
-                return True
-            else:
-                print(f"✗ {benchmark_name} failed with exit code {result.returncode}")
-                return False
-
-        except subprocess.TimeoutExpired:
-            print(f"✗ {benchmark_name} timed out")
-            return False
-        except Exception as e:
-            print(f"✗ Error running {benchmark_name}: {e}")
-            return False
-
-    def run_all_mpi_benchmarks_cluster(self, num_procs: int = 4) -> bool:
-        """
-        Run all MPI-based benchmarks across the cluster.
-
-        Args:
-            num_procs: Number of MPI processes per benchmark
-
-        Returns:
-            bool: True if all benchmarks ran successfully
+            Dict[str, bool]: Dictionary mapping benchmark names to success status
         """
         print("\n" + "="*70)
-        print("RUNNING ALL MPI BENCHMARKS ON CLUSTER")
+        print("RUNNING BENCHMARKS ON ALL CLUSTER NODES")
         print("="*70)
-
-        mpi_benchmarks = [
-            'mpi_latency',
-            'hybrid_mpi_openmp'
-        ]
-
+        
         results = {}
-        for benchmark in mpi_benchmarks:
-            success = self.run_mpi_benchmark_cluster(benchmark, num_procs)
-            results[benchmark] = success
-
-        # Summary
-        print("\n" + "="*70)
-        print("BENCHMARK RESULTS SUMMARY")
-        print("="*70)
+        
+        # Default benchmarks to run locally on each node
+        default_benchmarks = ['openmp_parallel']
+        benchmarks_to_run = benchmark_names or default_benchmarks
+        
+        # Build node list
+        nodes = ','.join(self.all_ips)
+        
+        for benchmark in benchmarks_to_run:
+            binary_path = self.benchmark_dir / "bin" / benchmark
+            
+            if not binary_path.exists():
+                print(f"\n⚠️  Skipping {benchmark} - binary not found: {binary_path}")
+                results[benchmark] = False
+                continue
+            
+            print(f"\n{'='*70}")
+            print(f"Running {benchmark} on all {len(self.all_ips)} nodes")
+            print(f"{'='*70}\n")
+            
+            try:
+                cmd = [
+                    'pdsh', '-w', nodes,
+                    f'cd {self.benchmark_dir} && bin/{benchmark}'
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                
+                if result.returncode == 0:
+                    print(result.stdout)
+                    print(f"✓ {benchmark} completed successfully on all nodes")
+                    results[benchmark] = True
+                else:
+                    print(result.stdout)
+                    print(result.stderr)
+                    print(f"✗ {benchmark} failed on some nodes")
+                    results[benchmark] = False
+                    
+            except subprocess.TimeoutExpired:
+                print(f"✗ {benchmark} timed out after 300 seconds")
+                results[benchmark] = False
+            except Exception as e:
+                print(f"✗ Error running {benchmark}: {e}")
+                results[benchmark] = False
+        
+        # Print summary
+        print(f"\n{'='*70}")
+        print("BENCHMARK EXECUTION SUMMARY")
+        print(f"{'='*70}")
+        successful = sum(1 for v in results.values() if v)
+        total = len(results)
+        print(f"Successful: {successful}/{total}")
         for benchmark, success in results.items():
-            status = "✓ PASSED" if success else "✗ FAILED"
-            print(f"  {benchmark:25s} {status}")
+            status = "✓" if success else "✗"
+            print(f"  {status} {benchmark}")
+        print(f"{'='*70}\n")
+        
+        return results
+    
+    def clean_install(self) -> bool:
+        """
+        Perform a clean installation by removing all existing benchmarks,
+        keys, and configurations, then regenerating everything.
+        
+        Returns:
+            bool: True if clean install successful
+        """
+        print("\n" + "="*70)
+        print("CLEAN INSTALL - REMOVING ALL EXISTING CONFIGURATIONS")
         print("="*70)
-
-        return all(results.values())
+        
+        try:
+            # Remove benchmark directory
+            if self.benchmark_dir.exists():
+                print(f"\n→ Removing benchmark directory: {self.benchmark_dir}")
+                import shutil
+                shutil.rmtree(self.benchmark_dir)
+                print(f"  ✓ Removed {self.benchmark_dir}")
+            
+            # Remove SSH keys
+            ssh_dir = Path.home() / ".ssh"
+            if ssh_dir.exists():
+                print(f"\n→ Removing SSH keys...")
+                for key_file in ['id_rsa', 'id_rsa.pub', 'id_ed25519', 'id_ed25519.pub']:
+                    key_path = ssh_dir / key_file
+                    if key_path.exists():
+                        key_path.unlink()
+                        print(f"  ✓ Removed {key_path}")
+                
+                # Clear known_hosts
+                known_hosts = ssh_dir / "known_hosts"
+                if known_hosts.exists():
+                    known_hosts.unlink()
+                    print(f"  ✓ Removed {known_hosts}")
+            
+            # Remove OpenMPI hostfiles
+            openmpi_dir = Path.home() / ".openmpi"
+            if openmpi_dir.exists():
+                print(f"\n→ Removing OpenMPI hostfiles...")
+                import shutil
+                shutil.rmtree(openmpi_dir)
+                print(f"  ✓ Removed {openmpi_dir}")
+            
+            # Remove pdsh hostfile
+            pdsh_dir = Path.home() / ".pdsh"
+            if pdsh_dir.exists():
+                print(f"\n→ Removing pdsh hostfiles...")
+                import shutil
+                shutil.rmtree(pdsh_dir)
+                print(f"  ✓ Removed {pdsh_dir}")
+            
+            # Remove GCC symlinks
+            print(f"\n→ Removing GCC compatibility symlinks...")
+            linuxbrew_bin = Path("/home/linuxbrew/.linuxbrew/bin")
+            if linuxbrew_bin.exists():
+                for symlink in ['gcc-11', 'g++-11', 'gfortran-11', 'gcc-12', 'g++-12', 'gfortran-12']:
+                    symlink_path = linuxbrew_bin / symlink
+                    if symlink_path.is_symlink():
+                        symlink_path.unlink()
+                        print(f"  ✓ Removed {symlink_path}")
+            
+            # Remove system binutils symlinks
+            print(f"\n→ Removing system binutils symlinks...")
+            for tool in ['as', 'ld', 'ar', 'ranlib', 'python3', 'pip3']:
+                symlink_path = Path(f"/usr/local/bin/{tool}")
+                if symlink_path.is_symlink():
+                    try:
+                        subprocess.run(['sudo', 'rm', '-f', str(symlink_path)], check=True)
+                        print(f"  ✓ Removed {symlink_path}")
+                    except:
+                        pass
+            
+            print(f"\n{'='*70}")
+            print("✓ CLEAN INSTALL COMPLETED - All configurations removed")
+            print("  Ready for fresh installation")
+            print(f"{'='*70}\n")
+            
+            return True
+            
+        except Exception as e:
+            print(f"\n✗ Error during clean install: {e}")
+            return False
