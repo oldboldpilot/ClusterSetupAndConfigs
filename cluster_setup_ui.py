@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
-Textual UI for Cluster Setup Script
-Provides an interactive interface to configure and deploy Slurm/OpenMPI cluster
+Terminal-based UI for cluster setup using Textual framework.
 """
 
 import os
@@ -283,6 +282,18 @@ class ClusterSetupUI(App):
             workers = config.get('workers', [])
             username = config.get('username', 'current user')
             
+            # Handle new format where master and workers contain IP and OS info
+            master_ip = master.get('ip') if isinstance(master, dict) else master
+            worker_list = []
+            if isinstance(workers, list):
+                for w in workers:
+                    if isinstance(w, dict):
+                        worker_list.append(w.get('ip'))
+                    else:
+                        worker_list.append(w)
+            else:
+                worker_list = workers
+            
             if not master or not workers:
                 config_info.update("[red]✗[/red] Invalid config: missing master or workers")
                 log.write("[red]Error:[/red] Config must contain 'master' and 'workers' fields")
@@ -290,8 +301,8 @@ class ClusterSetupUI(App):
             
             # Display config info
             info_text = f"[green]✓[/green] Valid configuration\n"
-            info_text += f"  Master: {master}\n"
-            info_text += f"  Workers: {', '.join(str(w) for w in workers)}\n"
+            info_text += f"  Master: {master_ip}\n"
+            info_text += f"  Workers: {', '.join(str(w) for w in worker_list)}\n"
             info_text += f"  Username: {username}"
             config_info.update(info_text)
             
@@ -392,8 +403,15 @@ class ClusterSetupUI(App):
             workers = config.get('workers', [])
             username = config.get('username')
             
+            # Handle new format where master and workers contain IP and OS info
+            if isinstance(master, dict):
+                master = master.get('ip')
+            
             if isinstance(workers, str):
                 workers = workers.split()
+            elif isinstance(workers, list) and workers and isinstance(workers[0], dict):
+                # Extract IPs from list of dicts
+                workers = [w.get('ip') if isinstance(w, dict) else w for w in workers]
             
             # Validate required fields
             if not master or not workers:

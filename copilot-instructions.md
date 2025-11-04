@@ -2,11 +2,15 @@
 
 ## Environment Context
 
-- **OS**: WSL (Windows Subsystem for Linux) on Ubuntu
-- **Python Version**: 3.13 (via Homebrew at `/home/linuxbrew/.linuxbrew/bin/python3.13`)
+- **OS Support**: Ubuntu/Debian (apt-get) OR Red Hat/CentOS/Fedora (dnf)
+- **WSL Support**: Works on WSL with proper configuration
+  - **CRITICAL**: Requires mirrored mode networking (`networkingMode = mirrored` in `.wslconfig`)
+  - Without mirrored mode, WSL uses NAT with internal IP inaccessible from other cluster nodes
+- **Python Version**: 3.14 (via Homebrew at `/home/linuxbrew/.linuxbrew/bin/python3.14`)
 - **Package Manager**: uv (fast Python package manager)
-- **Filesystem**: Code is on Windows mount (`/mnt/z/...`)
-- **Critical Issue**: Windows mounts don't support symlinks
+- **Run from Any Node**: Script can run from master or any worker - automatic detection
+- **Multi-OS Clusters**: Automatic OS detection and package manager selection
+- **Critical WSL Issue**: Windows mounts don't support symlinks
 
 ## Quick Reference Commands
 
@@ -44,6 +48,31 @@ error: failed to symlink file: Operation not permitted (os error 1)
 export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 ```
 
+## WSL Network Configuration (CRITICAL for Cluster)
+
+**Required for cluster operation**: WSL must use mirrored mode networking.
+
+Create or edit `C:\Users\<YourUsername>\.wslconfig` on Windows:
+```ini
+[wsl2]
+networkingMode = mirrored
+```
+
+Then restart WSL:
+```powershell
+wsl --shutdown
+```
+
+**Why this is required**:
+- Default NAT mode: WSL gets internal IP (172.x.x.x) not accessible from cluster nodes
+- Mirrored mode: WSL gets same IP as Windows host on physical network
+- Without mirrored mode: Cluster nodes cannot communicate with WSL node
+
+After enabling mirrored mode, configure Windows Firewall (PowerShell as Administrator):
+```powershell
+.\configure_wsl_firewall.ps1
+```
+
 ## Code Generation Guidelines
 
 ### When generating shell commands:
@@ -59,10 +88,10 @@ export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup && uv sync
 uv run python script.py
 ```
 
-### When suggesting Python code:
-1. Use Python 3.13 features and syntax
-2. Include type hints (project uses typing)
-3. Follow existing code style
+## Code Style Rules
+
+1. Use Python 3.14 features and syntax
+2. Add type hints to all functions
 
 ### When modifying dependencies:
 1. Edit `pyproject.toml` 
@@ -71,12 +100,10 @@ uv run python script.py
 ## Project Dependencies
 
 ```toml
-[project]
-requires-python = ">=3.13"
-dependencies = [
-    "PyYAML>=6.0",
-    "textual>=0.47.0"
-]
+name = "cluster-setup"
+version = "0.1.0"
+description = "Cluster setup and configuration tools"
+requires-python = ">=3.14"
 ```
 
 ## Common Scenarios
@@ -143,15 +170,39 @@ except Exception as e:
 ## Configuration Files
 
 ### YAML Config Format
+
+**Simple Format:**
 ```yaml
-master_ip: "192.168.1.x"
-worker_ips:
-  - "192.168.1.y"
-  - "192.168.1.z"
-username: "user"  # optional
+master: 192.168.1.10
+workers:
+  - 192.168.1.11
+  - 192.168.1.12
+username: myuser  # optional
 ```
 
-**Important**: Script must be run from the node with IP matching `master_ip` for automatic worker setup.
+**Extended Format (with OS and hostname - Recommended for Multi-OS):**
+```yaml
+master:
+  ip: 192.168.1.10
+  os: ubuntu wsl2
+  name: master-node
+workers:
+  - ip: 192.168.1.11
+    os: ubuntu
+    name: worker1
+  - ip: 192.168.1.12
+    os: redhat  # Red Hat worker - script will use dnf
+    name: worker2-redhat
+username: myuser  # optional
+```
+
+Both formats are supported. The code automatically detects and extracts IPs from either format.
+
+**Important Features:**
+- **Run from Any Node**: Script can run from master or any worker node
+- **Automatic Detection**: Uses `ip addr` to detect current node
+- **Multi-OS Support**: Automatically detects Ubuntu (apt-get) vs Red Hat (dnf)
+- **Other-Node Setup**: Sets up all nodes EXCEPT the current one
 
 ### Load Config
 ```python
@@ -292,13 +343,128 @@ config_file.chmod(0o600)
 - [ ] Verify package in `uv pip list`
 - [ ] Use `uv run python` not just `python`
 
-## Recent Updates (October 2025)
+## Recent Updates (2025)
 
-### Node Detection
-- Script automatically detects if running on master or worker node
-- Compares local IPs (via `ip addr`) with `master_ip` from config
+### Run from Any Node (Jan 2025)
+- Script can run from master OR any worker node
+- Automatically detects current node via `ip addr`
+- Sets up all OTHER nodes (excluding current)
+- If run from worker: sets up master + all other workers
+
+### Multi-OS Support (Jan 2025)
+- Supports Ubuntu/Debian (apt-get) AND Red Hat/CentOS/Fedora (dnf)
+- Automatic OS detection via `/etc/os-release`
+- Package manager auto-selection (apt-get vs dnf)
+- Different package names handled automatically:
+  - SSH: `openssh-client` vs `openssh-clients`
+  - Slurm: `slurm-wlm` vs `slurm`
+
+### Node Detection (Oct 2025)
+- Script automatically detects which node it's running on
+- Compares all local IPs (via `ip addr`) with master/worker IPs
 - Shows debug output: `DEBUG: Found IPs on interfaces: [...]`
-- Warns if not running on master node
+- Creates list of "other nodes" to setup
+
+### MPI Cluster Critical Fixes (Nov 2025)
+
+#### MPICH vs OpenMPI Incompatibility
+- **CRITICAL**: MPICH and OpenMPI cannot coexist in a cluster
+- PRTE daemons fail with "lost communication" errors
+- Script automatically detects and removes MPICH before installing OpenMPI
+- All nodes must use same MPI implementation (OpenMPI 5.0.8)
+```bash
+# Detection in install_openmpi()
+brew list mpich 2>/dev/null && brew uninstall mpich
+brew link open-mpi
+```
+
+#### SSH Key Mesh Distribution
+- **CRITICAL**: Full mesh required for any-node-as-head capability
+- Not just master → workers, but ALL nodes → ALL nodes
+- `distribute_ssh_keys_between_all_nodes()` collects and distributes all keys
+- Called automatically after node setup completes
+```python
+# Collects keys from all nodes (master + workers)
+# Distributes each node's key to all other nodes
+# Ensures any node can SSH to any other node
+```
+
+#### MCA Configuration Distribution
+- **CRITICAL**: Consistent OpenMPI settings on all nodes
+- Port ranges, network interface selection, prefix paths
+- `distribute_mca_config_to_all_nodes()` copies config cluster-wide
+- Called automatically after SSH key distribution
+```bash
+# Critical MCA parameters:
+btl_tcp_port_min_v4 = 50000
+oob_tcp_port_range = 50100-50200
+oob_tcp_if_include = ens1f0  # For multi-NIC nodes
+```
+
+#### Multi-Interface Network Handling
+- Nodes with multiple NICs on same subnet cause routing confusion
+- PRTE daemons advertise multiple IPs, routing fails
+- **Solution**: Specify exact interface in MCA config
+- **Performance**: ALWAYS bias towards highest throughput interface
+```bash
+# Detect multi-interface nodes
+ip addr show | grep "inet 192.168.1"
+
+# Check interface speeds - choose fastest for MPI
+ethtool ens1f0 | grep Speed  # 10000Mb/s (10 Gbps)
+ethtool ens1f1 | grep Speed  # 1000Mb/s (1 Gbps)
+
+# Configure in ~/.openmpi/mca-params.conf - use FASTEST interface
+oob_tcp_if_include = ens1f0  # 10 Gbps interface for MPI traffic
+btl_tcp_if_include = ens1f0  # Same for bulk transfer layer
+```
+
+**Key Insight**: MPI performance scales with network bandwidth. A 10 Gbps interface provides 10x better message passing performance than 1 Gbps.
+
+#### --map-by node Requirement (OpenMPI 5.x)
+- **CRITICAL**: Without this flag, all processes run on first node
+- OpenMPI 5.x changed default behavior from round-robin to sequential
+- **ALWAYS** use `--map-by node` for cross-cluster distribution
+```bash
+# Correct
+mpirun --map-by node -np 16 --hostfile /tmp/hosts ./program
+
+# Wrong (all 16 processes on first node!)
+mpirun -np 16 --hostfile /tmp/hosts ./program
+```
+
+### MPI Hostfiles (Auto-Generated)
+The setup script creates **three hostfiles** at `~/.openmpi/`:
+
+1. **`hostfile_optimal`** ⭐ **RECOMMENDED**
+   - 1 slot per node (1 MPI process per node)
+   - Best for hybrid MPI+OpenMP codes
+   - Minimizes communication overhead
+   - Allows maximum OpenMP threads per process
+
+2. **`hostfile_max`**
+   - Auto-detected cores per node (e.g., 16, 16, 44, 32)
+   - Best for pure MPI codes (no OpenMP)
+   - Maximum parallel decomposition
+
+3. **`hostfile`** (standard)
+   - Fixed 4 slots per node
+   - Balanced general-purpose configuration
+
+**Usage**:
+```bash
+# Optimal (1 process/node, max threads)
+export OMP_NUM_THREADS=16  # or auto-detect
+mpirun --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./program
+
+# Maximum MPI (152 processes total)
+mpirun --map-by node -np 152 --hostfile ~/.openmpi/hostfile_max ./program
+```
+
+**When to use which**:
+- Heterogeneous cluster → `hostfile_optimal`
+- Large communication patterns → `hostfile_optimal`
+- Embarrassingly parallel → `hostfile_max`
 
 ### Secure Sudo Password Handling
 - Uses `subprocess.Popen` with stdin piping
@@ -313,6 +479,8 @@ ip addr show | grep "inet "
 # Script outputs:
 # DEBUG: hostname='...', local_ip='...', master_ip='...'
 # DEBUG: Found IPs on interfaces: [...]
+# Current node is: MASTER or WORKER (192.168.1.X)
+# Will setup these other nodes: [...]
 ```
 
 ## Quick Fixes for Common Issues
@@ -320,13 +488,17 @@ ip addr show | grep "inet "
 | Issue | Quick Fix |
 |-------|-----------|
 | "Operation not permitted" | `export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup` |
-| "python3.13 not found" | `eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"` |
-| "Module not found" | `export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup && uv sync` |
-| "Wrong Python version" | `uv python pin 3.13` |
+| "python3.14 not found" | `eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"` |
+| "Dependencies not found" | `export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup && uv sync` |
+| "Wrong Python version" | `uv python pin 3.14` |
 | Import errors | Use `uv run python script.py` |
-| "Current node is: WORKER" | Run script from master node (check with `ip addr`) |
+| "Current node is: WORKER" | Script can run from any node - will setup all others |
 | "sudo: no password provided" | Script now handles this automatically via stdin piping |
 | Slurm commands not found | `eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"` |
+| "PRTE lost communication" | Check: same MPI on all nodes, SSH key mesh, MCA config |
+| "All MPI ranks on one node" | **ALWAYS** use `mpirun --map-by node` |
+| Multiple IPs on one node | Add `oob_tcp_if_include = interface` to MCA config |
+| MPICH/OpenMPI conflict | Script auto-detects and removes MPICH |
 
 ## Documentation References
 

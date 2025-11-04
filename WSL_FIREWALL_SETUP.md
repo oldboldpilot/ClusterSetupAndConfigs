@@ -8,13 +8,38 @@ OpenMPI 5.x uses PRRTE (PMIx Reference Runtime Environment) which requires bidir
 
 - Windows only forwards SSH (port 22) to WSL
 - Windows Firewall may block the MPI ports
+- WSL uses NAT mode networking, which isolates it from other cluster nodes
 - This causes `mpirun` to hang when trying to execute across cluster nodes
 
 ## The Solution
 
-We provide two PowerShell scripts to fix this:
+### Step 0: Enable WSL Mirrored Mode Networking (REQUIRED FIRST)
 
-### 1. configure_wsl_firewall.ps1 (REQUIRED)
+**Critical**: Before configuring firewall rules, you must enable mirrored mode networking in WSL.
+
+Create or edit `.wslconfig` in your Windows home directory (`C:\Users\<YourUsername>\.wslconfig`):
+
+```ini
+[wsl2]
+networkingMode = mirrored
+```
+
+After creating/editing this file, restart WSL:
+```powershell
+wsl --shutdown
+```
+
+**Why this is required**:
+- In default NAT mode, WSL uses an internal IP address (e.g., 172.x.x.x) that's not accessible from other cluster nodes
+- Mirrored mode gives your WSL instance the same IP address as your Windows host on the physical network
+- This allows other nodes in your cluster to communicate with the WSL node directly via its mirrored IP
+- Without mirrored mode, firewall rules alone won't help - other nodes simply cannot route to WSL
+
+### Step 1: PowerShell Scripts
+
+We provide two PowerShell scripts for firewall configuration:
+
+#### 1. configure_wsl_firewall.ps1 (REQUIRED)
 
 **What it does**:
 - Creates Windows Firewall rules to allow MPI ports 50000-50200
@@ -30,7 +55,7 @@ cd Z:\PycharmProjects\ClusterSetupAndConfigs
 
 **Output**: Creates firewall rules named `WSL2-OpenMPI-BTL-TCP` and `WSL2-OpenMPI-OOB-TCP`
 
-### 2. setup_wsl_port_forwarding.ps1 (OPTIONAL)
+#### 2. setup_wsl_port_forwarding.ps1 (OPTIONAL)
 
 **What it does**:
 - Sets up Windows netsh port forwarding for ports 50000-50200
@@ -51,15 +76,20 @@ cd Z:\PycharmProjects\ClusterSetupAndConfigs
 
 ## Quick Start
 
-For most WSL clusters (nodes within the same network), you only need Step 1:
+For most WSL clusters (nodes within the same network), follow these steps:
 
-1. **Run as Administrator in PowerShell**:
+1. **Enable mirrored networking** (see Step 0 above - REQUIRED)
+   - Edit `C:\Users\<YourUsername>\.wslconfig`
+   - Add `networkingMode = mirrored` under `[wsl2]`
+   - Run `wsl --shutdown` to restart WSL
+
+2. **Run firewall configuration as Administrator in PowerShell**:
    ```powershell
    cd Z:\PycharmProjects\ClusterSetupAndConfigs
    .\configure_wsl_firewall.ps1
    ```
 
-2. **Test in WSL**:
+3. **Test in WSL**:
    ```bash
    # Test cross-cluster MPI
    mpirun -np 6 --hostfile ~/.openmpi/hostfile hostname

@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Simple MPI test script to verify cluster communication.
-Run with: mpirun -np <num_processes> --host <host1>,<host2> python3 mpi_test.py
+Run with: mpirun -np <num_processes> --host <host1>,<host2> python3.14 mpi_test.py
 """
 
 from mpi4py import MPI

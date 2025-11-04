@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Cluster Setup Script for Slurm and OpenMPI
-Supports Ubuntu Linux and WSL with Ubuntu
+Supports Ubuntu Linux, WSL with Ubuntu, and Red Hat/CentOS/Fedora
 
 Usage:
     python cluster_setup.py --config config.yml [--password]
@@ -9,19 +9,22 @@ Usage:
     --config:   Path to YAML configuration file (required)
     --password: Prompt for password to automatically setup entire cluster (optional)
 
-When run with --password on the master node:
-    1. Sets up the master node (password is used for sudo commands)
-    2. Copies SSH keys to all worker nodes
-    3. Automatically runs the setup on each worker node via SSH
-    4. Password is automatically provided for sudo commands on worker nodes
-    5. Configures the entire cluster in one command without manual intervention
+Can be run from ANY node in the cluster (master or worker):
+    1. Sets up the current node (password is used for sudo commands)
+    2. Copies SSH keys to all other nodes
+    3. Automatically runs the setup on all other nodes via SSH
+    4. Password is automatically provided for sudo commands on remote nodes
+    5. Configures the entire cluster in one command from any node
 
 Example:
-    # Full automatic cluster setup (recommended)
+    # Full automatic cluster setup from any node (recommended)
     python cluster_setup.py --config cluster_config.yaml --password
     
     # Manual setup (without --password, you must run on each node separately)
     python cluster_setup.py --config cluster_config.yaml
+    
+Note: The script automatically detects which node it's running on and sets up
+      all other nodes in the cluster accordingly.
 """
 
 import argparse
@@ -50,9 +53,34 @@ class ClusterSetup:
         self.all_ips = [master_ip] + worker_ips
         self.username = username or os.getenv('USER', 'ubuntu')
         self.password = password
+        self.os_type = self._detect_os()
+        self.pkg_manager = 'dnf' if self.os_type == 'redhat' else 'apt-get'
         self.is_master = self._is_current_node_master()
         # Get master hostname - will be used for slurm.conf generation
         self.master_hostname = self._get_master_hostname()
+    
+    def _detect_os(self) -> str:
+        """Detect the operating system type (ubuntu or redhat)"""
+        try:
+            # Check /etc/os-release
+            if os.path.exists('/etc/os-release'):
+                with open('/etc/os-release', 'r') as f:
+                    content = f.read().lower()
+                    if 'red hat' in content or 'rhel' in content or 'fedora' in content or 'centos' in content:
+                        return 'redhat'
+                    elif 'ubuntu' in content or 'debian' in content:
+                        return 'ubuntu'
+            
+            # Fallback: check if dnf or apt-get exists
+            if shutil.which('dnf'):
+                return 'redhat'
+            elif shutil.which('apt-get'):
+                return 'ubuntu'
+        except Exception as e:
+            print(f"DEBUG: Error detecting OS: {e}")
+        
+        # Default to ubuntu for backward compatibility
+        return 'ubuntu'
         
     def _is_wsl(self) -> bool:
         """Detect if running on WSL"""
@@ -126,12 +154,20 @@ class ClusterSetup:
 
     def run_command(self, command: str, check: bool = True, shell: bool = True) -> subprocess.CompletedProcess:
         """Run a shell command and return the result"""
+        # Ensure Homebrew is in PATH for all commands
+        env = os.environ.copy()
+        homebrew_path = "/home/linuxbrew/.linuxbrew/bin"
+        homebrew_sbin = "/home/linuxbrew/.linuxbrew/sbin"
+        if os.path.exists(homebrew_path):
+            env['PATH'] = f"{homebrew_path}:{homebrew_sbin}:{env.get('PATH', '')}"
+        
         result = subprocess.run(
             command,
             shell=shell,
             check=False,
             capture_output=True,
-            text=True
+            text=True,
+            env=env
         )
         
         if check and result.returncode != 0:
@@ -184,19 +220,24 @@ class ClusterSetup:
         return result.returncode == 0
     
     def install_homebrew(self):
-        """Install Homebrew on Ubuntu/WSL"""
-        print("\n=== Installing Homebrew ===")
+        """Install Homebrew on Ubuntu/WSL or Red Hat"""
+        print(f"\n=== Installing Homebrew (detected OS: {self.os_type}) ===")
         
         # Check if brew is already installed (use shutil.which for robustness)
         if shutil.which("brew") or os.path.exists("/home/linuxbrew/.linuxbrew/bin/brew"):
             print("Homebrew already installed")
             return
         
-        # Install dependencies for Homebrew
+        # Install dependencies for Homebrew based on OS
         print("Installing Homebrew dependencies...")
-        self.run_sudo_command(
-            "apt-get update && apt-get install -y build-essential procps curl file git"
-        )
+        if self.pkg_manager == 'dnf':
+            self.run_sudo_command(
+                "dnf groupinstall -y 'Development Tools' && dnf install -y procps-ng curl file git"
+            )
+        else:
+            self.run_sudo_command(
+                "apt-get update && apt-get install -y build-essential procps curl file git"
+            )
         
         # Install Homebrew
         print("Installing Homebrew...")
@@ -211,11 +252,18 @@ class ClusterSetup:
         if os.path.exists(homebrew_path):
             os.environ['PATH'] = f"{homebrew_path}:{os.environ['PATH']}"
             
-            # Add to shell profile
+            # Add to shell profile with compiler settings
             shell_profile = Path.home() / ".bashrc"
             with open(shell_profile, 'a') as f:
                 f.write('\n# Homebrew\n')
                 f.write(f'eval "$({homebrew_path}/brew shellenv)"\n')
+                f.write('\n# Always use Homebrew GCC for compilation\n')
+                f.write(f'export CC={homebrew_path}/gcc-11\n')
+                f.write(f'export CXX={homebrew_path}/g++-11\n')
+                f.write(f'export FC={homebrew_path}/gfortran-11\n')
+                f.write(f'export OMPI_CC={homebrew_path}/gcc-11\n')
+                f.write(f'export OMPI_CXX={homebrew_path}/g++-11\n')
+                f.write(f'export OMPI_FC={homebrew_path}/gfortran-11\n')
         
         print("Homebrew installed successfully")
     
@@ -305,7 +353,7 @@ class ClusterSetup:
             print(f"Warning: Could not update SSH config: {e}")
         
         # Create ~/.ssh/environment for user
-        print("Creating ~/.ssh/environment...")
+        print("Creating ~/.ssh/environment with compiler settings...")
         try:
             ssh_dir = Path.home() / ".ssh"
             ssh_dir.mkdir(mode=0o700, exist_ok=True)
@@ -313,9 +361,16 @@ class ClusterSetup:
             ssh_env = ssh_dir / "environment"
             with open(ssh_env, 'w') as f:
                 f.write(f"PATH={homebrew_path}:{homebrew_sbin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n")
+                # Set compiler environment variables to always use Homebrew GCC
+                f.write(f"CC={homebrew_path}/gcc-11\n")
+                f.write(f"CXX={homebrew_path}/g++-11\n")
+                f.write(f"FC={homebrew_path}/gfortran-11\n")
+                f.write(f"OMPI_CC={homebrew_path}/gcc-11\n")
+                f.write(f"OMPI_CXX={homebrew_path}/g++-11\n")
+                f.write(f"OMPI_FC={homebrew_path}/gfortran-11\n")
             
             ssh_env.chmod(0o600)
-            print("✓ Created ~/.ssh/environment")
+            print("✓ Created ~/.ssh/environment with Homebrew compiler settings")
         
         except Exception as e:
             print(f"Warning: Could not create ~/.ssh/environment: {e}")
@@ -331,8 +386,11 @@ class ClusterSetup:
         
         # Install OpenSSH client and server
         print("Installing OpenSSH client and server...")
-        self.run_sudo_command("apt-get update", check=False)
-        self.run_sudo_command("apt-get install -y openssh-client openssh-server")
+        if self.pkg_manager == 'dnf':
+            self.run_sudo_command("dnf install -y openssh-clients openssh-server", check=False)
+        else:
+            self.run_sudo_command("apt-get update", check=False)
+            self.run_sudo_command("apt-get install -y openssh-client openssh-server")
         
         # Start SSH service
         print("Starting SSH service...")
@@ -405,13 +463,17 @@ class ClusterSetup:
         if not shutil.which("sshpass"):
             print("Installing sshpass for automatic SSH key copying...")
             try:
-                # Wait for any other apt processes to finish and update/install sshpass
-                self.run_sudo_command("while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done", check=False)
-                self.run_sudo_command("apt-get update", check=True)
-                self.run_sudo_command("apt-get install -y sshpass", check=True)
+                if self.pkg_manager == 'dnf':
+                    self.run_sudo_command("dnf install -y sshpass", check=True)
+                else:
+                    # Wait for any other apt processes to finish and update/install sshpass
+                    self.run_sudo_command("while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 1; done", check=False)
+                    self.run_sudo_command("apt-get update", check=True)
+                    self.run_sudo_command("apt-get install -y sshpass", check=True)
             except Exception as e:
                 print(f"Failed to install sshpass: {e}")
-                print("Please install sshpass manually: sudo apt-get install -y sshpass")
+                pkg_cmd = "dnf" if self.pkg_manager == 'dnf' else "apt-get"
+                print(f"Please install sshpass manually: sudo {pkg_cmd} install -y sshpass")
                 print("Or copy SSH keys manually to worker nodes")
                 return
         
@@ -454,48 +516,257 @@ class ClusterSetup:
         
         print("\nSSH key distribution completed")
     
+    def distribute_ssh_keys_between_all_nodes(self):
+        """
+        Distribute SSH keys between ALL nodes so any node can SSH to any other node.
+        This creates a full mesh where every node can connect to every other node
+        via any of their IP addresses. This is critical for:
+        - MPI to work from any node as the head node
+        - Nodes with multiple network interfaces (multi-homed)
+        - Flexible cluster topology
+        """
+        if not self.password:
+            print("\nSkipping cross-node SSH key distribution (no password provided)")
+            return
+        
+        print(f"\n{'=' * 60}")
+        print("CROSS-NODE SSH KEY DISTRIBUTION")
+        print(f"{'=' * 60}")
+        print("Ensuring all nodes can SSH to each other (required for MPI)...")
+        print("Collecting ALL IP addresses from each node (including multi-homed nodes)...")
+        
+        # Get all node IPs (master + all workers) - primary IPs from config
+        primary_nodes = [self.master_ip] + self.worker_ips
+        
+        # Dictionary to store all IP addresses for each node
+        # Key: primary IP, Value: list of all IPs on that node
+        node_all_ips = {}
+        
+        import tempfile
+        
+        # First, collect ALL IP addresses from each node
+        for node_ip in primary_nodes:
+            print(f"\nDetecting all IP addresses on {node_ip}...")
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_pass:
+                    temp_pass.write(self.password)
+                    temp_pass_path = temp_pass.name
+                
+                try:
+                    # Get all IP addresses from the node (excluding loopback)
+                    cmd = f'sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} "ip addr show | grep \'inet \' | grep -v \'127.0.0.1\' | awk \'{{print \\$2}}\' | cut -d/ -f1"'
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    
+                    if result and result.returncode == 0:
+                        ips = [ip.strip() for ip in result.stdout.strip().split('\n') if ip.strip()]
+                        node_all_ips[node_ip] = ips
+                        print(f"  Found IPs: {', '.join(ips)}")
+                    else:
+                        # Fallback to just the primary IP
+                        node_all_ips[node_ip] = [node_ip]
+                        print(f"  Using primary IP: {node_ip}")
+                finally:
+                    os.unlink(temp_pass_path)
+                    
+            except Exception as e:
+                print(f"⚠ Could not detect IPs on {node_ip}: {e}")
+                node_all_ips[node_ip] = [node_ip]  # Fallback to primary IP
+        
+        # Collect public keys from all nodes (using primary IP)
+        node_public_keys = {}
+        
+        for node_ip in primary_nodes:
+            print(f"\nCollecting public key from {node_ip}...")
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_pass:
+                    temp_pass.write(self.password)
+                    temp_pass_path = temp_pass.name
+                
+                try:
+                    # Get the public key from the node
+                    cmd = f'sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} "cat ~/.ssh/id_rsa.pub 2>/dev/null || echo \\"NO_KEY\\""'
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    
+                    if result and result.returncode == 0 and "NO_KEY" not in result.stdout:
+                        pub_key = result.stdout.strip()
+                        node_public_keys[node_ip] = pub_key
+                        print(f"✓ Collected public key from {node_ip}")
+                    else:
+                        print(f"⚠ No SSH key found on {node_ip} (will be generated during setup)")
+                finally:
+                    os.unlink(temp_pass_path)
+                    
+            except Exception as e:
+                print(f"⚠ Could not collect public key from {node_ip}: {e}")
+        
+        # Now distribute each node's public key to ALL other nodes (all their IPs)
+        # This creates a full mesh where any node can SSH to any IP of any other node
+        total_distributions = 0
+        successful_distributions = 0
+        
+        for source_node, pub_key in node_public_keys.items():
+            source_ips = node_all_ips.get(source_node, [source_node])
+            
+            for target_node in primary_nodes:
+                if source_node == target_node:
+                    continue  # Skip distributing to self
+                
+                # Get all IPs for target node
+                target_ips = node_all_ips.get(target_node, [target_node])
+                
+                print(f"\nDistributing {source_node}'s key to {target_node} (all {len(target_ips)} IP(s))...")
+                
+                # Try to distribute to the primary IP (most likely to work)
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_pass:
+                        temp_pass.write(self.password)
+                        temp_pass_path = temp_pass.name
+                    
+                    try:
+                        total_distributions += 1
+                        # Append the public key to authorized_keys on target node
+                        # This will work for all IPs on that node since it's the same ~/.ssh/authorized_keys file
+                        cmd = f'sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{target_node} "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo \'{pub_key}\' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"'
+                        self.run_command(cmd, check=True)
+                        successful_distributions += 1
+                        print(f"  ✓ Added {source_node}'s key to {target_node}")
+                        print(f"    This key will work for all IPs: {', '.join(target_ips)}")
+                    finally:
+                        os.unlink(temp_pass_path)
+                        
+                except Exception as e:
+                    print(f"  ✗ Failed to add {source_node}'s key to {target_node}: {e}")
+        
+        print(f"\n{'=' * 60}")
+        print(f"✓ Cross-node SSH key distribution completed")
+        print(f"  Total nodes: {len(primary_nodes)}")
+        print(f"  Total IPs detected: {sum(len(ips) for ips in node_all_ips.values())}")
+        print(f"  Key distributions: {successful_distributions}/{total_distributions} successful")
+        print(f"All nodes can now SSH to each other via any IP without passwords")
+        print(f"{'=' * 60}")
+    
+    def distribute_mca_config_to_all_nodes(self):
+        """
+        Distribute OpenMPI MCA configuration to all nodes.
+        This ensures consistent MPI settings across the cluster.
+        """
+        if not self.password:
+            print("\nSkipping MCA config distribution (no password provided)")
+            return
+        
+        print(f"\n{'=' * 60}")
+        print("DISTRIBUTING OPENMPI MCA CONFIGURATION")
+        print(f"{'=' * 60}")
+        
+        # Check if local MCA config exists
+        local_mca_file = Path.home() / ".openmpi" / "mca-params.conf"
+        if not local_mca_file.exists():
+            print("⚠ Local MCA config not found, skipping distribution")
+            return
+        
+        # Read the local MCA config
+        with open(local_mca_file, 'r') as f:
+            mca_content = f.read()
+        
+        print("Distributing MCA configuration to all nodes...")
+        
+        # Get all node IPs (master + all workers)
+        all_nodes = [self.master_ip] + self.worker_ips
+        
+        import tempfile
+        
+        for node_ip in all_nodes:
+            # Skip current node - it already has the config
+            try:
+                import socket
+                result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, check=False)
+                if result.returncode == 0:
+                    import re
+                    ip_pattern = r'inet\s+(\d+\.\d+\.\d+\.\d+)'
+                    found_ips = re.findall(ip_pattern, result.stdout)
+                    if node_ip in found_ips:
+                        print(f"Skipping {node_ip} (current node)")
+                        continue
+            except:
+                pass
+            
+            print(f"\nDistributing MCA config to {node_ip}...")
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_pass:
+                    temp_pass.write(self.password)
+                    temp_pass_path = temp_pass.name
+                
+                try:
+                    # Create .openmpi directory on remote node
+                    cmd = f'sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} "mkdir -p ~/.openmpi"'
+                    self.run_command(cmd, check=True)
+                    
+                    # Create a temporary file with MCA content
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as temp_mca:
+                        temp_mca.write(mca_content)
+                        temp_mca_path = temp_mca.name
+                    
+                    try:
+                        # Copy MCA config to remote node
+                        copy_cmd = f"sshpass -f {temp_pass_path} scp -o StrictHostKeyChecking=no {temp_mca_path} {self.username}@{node_ip}:~/.openmpi/mca-params.conf"
+                        self.run_command(copy_cmd, check=True)
+                        print(f"  ✓ MCA config copied to {node_ip}")
+                    finally:
+                        os.unlink(temp_mca_path)
+                        
+                finally:
+                    os.unlink(temp_pass_path)
+                    
+            except Exception as e:
+                print(f"  ✗ Failed to distribute MCA config to {node_ip}: {e}")
+        
+        print(f"\n{'=' * 60}")
+        print("✓ MCA configuration distribution completed")
+        print("All nodes now have consistent OpenMPI settings")
+        print(f"{'=' * 60}")
+    
     def _setup_worker_node(self, worker_ip: str, config_file: str):
-        """Setup a worker node remotely via SSH"""
+        """Setup a cluster node remotely via SSH (installs prerequisites and runs full setup)"""
         import tempfile
         
         print(f"\n{'=' * 60}")
-        print(f"Setting up worker node: {worker_ip}")
+        print(f"Setting up cluster node: {worker_ip}")
         print(f"{'=' * 60}")
         
         if not self.password:
-            print("Error: Password required for worker setup")
+            print("Error: Password required for remote node setup")
             return False
         
         try:
-            # First, copy the config file to the worker node
-            temp_config = f"/tmp/cluster_config_{os.getpid()}.yaml"
-            print(f"Copying configuration file to {worker_ip}...")
-            copy_cmd = f"scp -o StrictHostKeyChecking=no {config_file} {self.username}@{worker_ip}:{temp_config}"
-            self.run_command(copy_cmd, check=True)
-            
-            # Copy the cluster_setup.py script to the worker node
-            script_path = os.path.abspath(__file__)
-            temp_script = f"/tmp/cluster_setup_{os.getpid()}.py"
-            print(f"Copying setup script to {worker_ip}...")
-            copy_script_cmd = f"scp -o StrictHostKeyChecking=no {script_path} {self.username}@{worker_ip}:{temp_script}"
-            self.run_command(copy_script_cmd, check=True)
-            
-            # Make the script executable
-            chmod_cmd = f"ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'chmod +x {temp_script}'"
-            self.run_command(chmod_cmd, check=True)
-            
-            # Create a temporary password file for sudo
+            # Create a temporary password file for sshpass
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_pass_file:
                 temp_pass_file.write(self.password)
                 temp_pass_path = temp_pass_file.name
             
             try:
-                # Configure passwordless sudo for the user (temporary, for installation)
-                print(f"Configuring sudo access on {worker_ip}...")
+                # First, copy the config file to the worker node
+                temp_config = f"/tmp/cluster_config_{os.getpid()}.yaml"
+                print(f"Copying configuration file to {worker_ip}...")
+                copy_cmd = f"sshpass -f {temp_pass_path} scp -o StrictHostKeyChecking=no {config_file} {self.username}@{worker_ip}:{temp_config}"
+                self.run_command(copy_cmd, check=True)
                 
-                # Create a wrapper script that handles sudo with password
+                # Copy the cluster_setup.py script to the worker node
+                script_path = os.path.abspath(__file__)
+                temp_script = f"/tmp/cluster_setup_{os.getpid()}.py"
+                print(f"Copying setup script to {worker_ip}...")
+                copy_script_cmd = f"sshpass -f {temp_pass_path} scp -o StrictHostKeyChecking=no {script_path} {self.username}@{worker_ip}:{temp_script}"
+                self.run_command(copy_script_cmd, check=True)
+                
+                # Make the script executable
+                chmod_cmd = f"sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'chmod +x {temp_script}'"
+                self.run_command(chmod_cmd, check=True)
+                
+                # Configure passwordless sudo for the user (temporary, for installation)
+                print(f"Installing prerequisites on {worker_ip}...")
+                
+                # Create a wrapper script that installs prerequisites and runs setup
                 wrapper_script = f"""#!/bin/bash
-# Wrapper script to run cluster setup with sudo password handling
+# Wrapper script to install prerequisites and run cluster setup
 
 # Create a helper function for sudo with password
 export SUDO_ASKPASS=/tmp/askpass_{os.getpid()}.sh
@@ -505,11 +776,85 @@ echo '{self.password}'
 ASKPASS_EOF
 chmod +x $SUDO_ASKPASS
 
+export SUDO_ASKPASS
+
+echo "=== Installing Prerequisites on Remote Node ==="
+
+# Ensure Homebrew is in PATH
+if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+fi
+
+# Check if Homebrew is installed
+if ! command -v brew &> /dev/null; then
+    echo "Installing Homebrew..."
+    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    
+    # Add Homebrew to PATH for this session
+    if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+        export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+    fi
+else
+    echo "Homebrew already installed"
+fi
+
+# Check if Python 3.14 is installed
+if ! command -v python3.14 &> /dev/null; then
+    echo "Installing Python 3.14..."
+    brew install python@3.14
+else
+    echo "Python 3.14 already installed"
+fi
+
+# Check if uv is installed
+if ! command -v uv &> /dev/null; then
+    echo "Installing uv package manager..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    # Add uv to PATH for this session
+    export PATH="$HOME/.cargo/bin:$PATH"
+else
+    echo "uv already installed"
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
+# Install PyYAML using pip (for standalone script execution)
+echo "Installing PyYAML..."
+# Use --break-system-packages for Homebrew Python (externally managed environment)
+python3.14 -m pip install --user --break-system-packages pyyaml 2>&1 | grep -E "(Successfully|already satisfied)" || true
+
+# Verify PyYAML is installed
+if python3.14 -c "import yaml" 2>/dev/null; then
+    echo "✓ PyYAML successfully installed and verified"
+else
+    echo "✗ WARNING: PyYAML installation failed!"
+    echo "  Trying alternative installation method..."
+    # Try with pip3.14 directly
+    pip3.14 install --user --break-system-packages pyyaml 2>&1 || true
+    # Final verification
+    if python3.14 -c "import yaml" 2>/dev/null; then
+        echo "✓ PyYAML installed successfully with pip3.14"
+    else
+        echo "✗ ERROR: Could not install PyYAML. Remote setup may fail."
+    fi
+fi
+
+echo "=== Prerequisites installation completed ==="
+echo ""
+
+# Ensure Homebrew paths are in environment for the setup script
+if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
+fi
+
 # Run the setup script WITHOUT --password flag
 # The worker node doesn't need password for SSH setup (already has keys from master)
 # Use --non-interactive flag to skip confirmation prompts
-export SUDO_ASKPASS
-python3 {temp_script} --config {temp_config} --non-interactive
+echo "=== Running cluster setup script ==="
+python3.14 {temp_script} --config {temp_config} --non-interactive
 
 # Cleanup
 rm -f $SUDO_ASKPASS
@@ -523,14 +868,15 @@ rm -f $SUDO_ASKPASS
                     local_wrapper_path = local_wrapper.name
                 
                 try:
-                    copy_wrapper_cmd = f"scp -o StrictHostKeyChecking=no {local_wrapper_path} {self.username}@{worker_ip}:{temp_wrapper}"
+                    copy_wrapper_cmd = f"sshpass -f {temp_pass_path} scp -o StrictHostKeyChecking=no {local_wrapper_path} {self.username}@{worker_ip}:{temp_wrapper}"
                     self.run_command(copy_wrapper_cmd, check=True)
                     
-                    chmod_wrapper_cmd = f"ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'chmod +x {temp_wrapper}'"
+                    chmod_wrapper_cmd = f"sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'chmod +x {temp_wrapper}'"
                     self.run_command(chmod_wrapper_cmd, check=True)
                     
                     # Run the setup script on the worker node with password handling
-                    print(f"Running setup on {worker_ip} (this may take several minutes)...")
+                    print(f"Installing prerequisites and running setup on {worker_ip}...")
+                    print(f"(This may take several minutes - installing Homebrew, Python 3.14, uv, and PyYAML)...")
                     
                     # Use sshpass to handle interactive sudo prompts
                     setup_cmd = f"sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'bash {temp_wrapper} 2>&1'"
@@ -553,14 +899,14 @@ rm -f $SUDO_ASKPASS
                     process.wait()
                     
                     if process.returncode == 0:
-                        print(f"\n✓ Successfully set up worker node: {worker_ip}")
+                        print(f"\n✓ Successfully set up node: {worker_ip}")
                         success = True
                     else:
-                        print(f"\n✗ Failed to set up worker node: {worker_ip} (exit code: {process.returncode})")
+                        print(f"\n✗ Failed to set up node: {worker_ip} (exit code: {process.returncode})")
                         success = False
                     
                     # Cleanup temporary files on worker node
-                    cleanup_cmd = f"ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'rm -f {temp_config} {temp_script} {temp_wrapper} /tmp/askpass_*.sh'"
+                    cleanup_cmd = f"sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{worker_ip} 'rm -f {temp_config} {temp_script} {temp_wrapper} /tmp/askpass_*.sh'"
                     self.run_command(cleanup_cmd, check=False)
                     
                     return success
@@ -579,42 +925,52 @@ rm -f $SUDO_ASKPASS
             traceback.print_exc()
             return False
     
-    def setup_all_workers(self, config_file: str):
-        """Automatically setup all worker nodes via SSH"""
+    def setup_all_workers(self, config_file: str, node_list: Optional[List[str]] = None):
+        """Automatically setup specified nodes via SSH (or all worker nodes if not specified)"""
         if not self.password:
-            print("\nSkipping automatic worker setup (no password provided)")
+            print("\nSkipping automatic node setup (no password provided)")
             return False
         
-        if not self.worker_ips:
-            print("\nNo worker nodes to setup")
+        # Use provided node list or default to worker_ips
+        nodes_to_setup = node_list if node_list is not None else self.worker_ips
+        
+        if not nodes_to_setup:
+            print("\nNo nodes to setup")
             return True
         
         print(f"\n{'=' * 60}")
-        print("AUTOMATIC WORKER NODE SETUP")
+        print("AUTOMATIC CLUSTER NODE SETUP")
         print(f"{'=' * 60}")
-        print(f"Will setup {len(self.worker_ips)} worker node(s)")
-        print(f"Worker IPs: {', '.join(self.worker_ips)}")
-        print("\nProceeding with automatic worker setup...")
+        print(f"Will setup {len(nodes_to_setup)} node(s)")
+        print(f"Node IPs: {', '.join(nodes_to_setup)}")
+        print("\nProceeding with automatic node setup...")
         
         success_count = 0
         failed_nodes = []
         
-        for worker_ip in self.worker_ips:
-            if self._setup_worker_node(worker_ip, config_file):
+        for node_ip in nodes_to_setup:
+            if self._setup_worker_node(node_ip, config_file):
                 success_count += 1
             else:
-                failed_nodes.append(worker_ip)
+                failed_nodes.append(node_ip)
         
         print(f"\n{'=' * 60}")
-        print("WORKER SETUP SUMMARY")
+        print("NODE SETUP SUMMARY")
         print(f"{'=' * 60}")
-        print(f"Total workers: {len(self.worker_ips)}")
+        print(f"Total nodes: {len(nodes_to_setup)}")
         print(f"Successfully set up: {success_count}")
         print(f"Failed: {len(failed_nodes)}")
         
         if failed_nodes:
             print(f"\nFailed nodes: {', '.join(failed_nodes)}")
             print("You may need to setup these nodes manually")
+        
+        # After all nodes are set up, distribute SSH keys between all nodes
+        # This ensures any node can be used as the MPI head node
+        if success_count > 0:
+            self.distribute_ssh_keys_between_all_nodes()
+            # Also distribute MCA configuration to ensure consistent OpenMPI settings
+            self.distribute_mca_config_to_all_nodes()
         
         return len(failed_nodes) == 0
     
@@ -652,7 +1008,7 @@ rm -f $SUDO_ASKPASS
             print("/etc/hosts already contains cluster node entries")
     
     def install_slurm(self):
-        """Install Slurm workload manager using apt"""
+        """Install Slurm workload manager using system package manager"""
         print("\n=== Installing Slurm ===")
         
         # Check if Slurm is already installed
@@ -662,32 +1018,145 @@ rm -f $SUDO_ASKPASS
             return
         
         # Note: Homebrew has a "slurm" package but it's a network monitor, not the workload manager
-        # We need to install slurm-wlm from apt instead
-        print("Installing Slurm workload manager from apt...")
-        self.run_sudo_command("apt-get update")
-        self.run_sudo_command("apt-get install -y slurm-wlm slurm-wlm-doc slurm-client")
+        # We need to install slurm from system package manager instead
+        print(f"Installing Slurm workload manager using {self.pkg_manager}...")
+        if self.pkg_manager == 'dnf':
+            self.run_sudo_command("dnf install -y slurm slurm-slurmd slurm-slurmctld")
+        else:
+            self.run_sudo_command("apt-get update")
+            self.run_sudo_command("apt-get install -y slurm-wlm slurm-wlm-doc slurm-client")
         
         print("Slurm installation completed")
     
     def install_openmpi(self):
-        """Install OpenMPI using Homebrew"""
-        print("\n=== Installing OpenMPI ===")
+        """Install OpenMPI, GCC, and CMake using Homebrew"""
+        print("\n=== Installing OpenMPI with GCC and CMake ===")
         
         brew_cmd = "/home/linuxbrew/.linuxbrew/bin/brew"
         if not os.path.exists(brew_cmd):
             print("Error: Homebrew not found. Please install Homebrew first.")
             return
         
+        # CRITICAL: Check if MPICH is installed and uninstall it
+        # MPICH and OpenMPI are incompatible and cannot coexist for cluster MPI
+        print("Checking for MPICH (incompatible with OpenMPI)...")
+        mpich_check = self.run_command(f"{brew_cmd} list mpich 2>/dev/null", check=False)
+        if mpich_check.returncode == 0:
+            print("⚠️  MPICH detected! Uninstalling (incompatible with OpenMPI for cross-cluster execution)...")
+            self.run_command(f"{brew_cmd} uninstall mpich", check=False)
+            print("✓ MPICH uninstalled")
+        else:
+            print("✓ No MPICH installation found (good)")
+        
+        # Install GCC first (required for mpicc)
+        print("Installing GCC via Homebrew...")
+        result = self.run_command(f"{brew_cmd} install gcc", check=False)
+        if result.returncode == 0:
+            print("✓ GCC installed successfully")
+        else:
+            print("GCC installation failed or already installed")
+        
+        # Install CMake
+        print("Installing CMake via Homebrew...")
+        result = self.run_command(f"{brew_cmd} install cmake", check=False)
+        if result.returncode == 0:
+            print("✓ CMake installed successfully")
+        else:
+            print("CMake installation failed or already installed")
+        
+        # Create symlinks for OpenMPI compatibility
+        # OpenMPI's prebuilt bottles are compiled to use gcc-11, but Homebrew installs gcc-15
+        # Create symlinks so mpicc can find the compiler
+        print("Creating compiler symlinks for OpenMPI compatibility...")
+        homebrew_bin = "/home/linuxbrew/.linuxbrew/bin"
+        
+        # Find the installed gcc version
+        gcc_version_result = self.run_command(f"ls {homebrew_bin}/gcc-* 2>/dev/null | grep -E 'gcc-[0-9]+$' | head -1", check=False)
+        if gcc_version_result.returncode == 0 and gcc_version_result.stdout.strip():
+            gcc_path = gcc_version_result.stdout.strip()
+            gcc_version = gcc_path.split('-')[-1]
+            print(f"Found GCC version: {gcc_version}")
+            
+            # Create gcc-11 and g++-11 symlinks pointing to the actual gcc version
+            self.run_command(f"ln -sf {homebrew_bin}/gcc-{gcc_version} {homebrew_bin}/gcc-11", check=False)
+            self.run_command(f"ln -sf {homebrew_bin}/g++-{gcc_version} {homebrew_bin}/g++-11", check=False)
+            self.run_command(f"ln -sf {homebrew_bin}/gfortran-{gcc_version} {homebrew_bin}/gfortran-11", check=False)
+            print(f"✓ Created compiler symlinks: gcc-11 -> gcc-{gcc_version}")
+        else:
+            print("⚠️  Could not detect GCC version for symlink creation")
+        
         # Install OpenMPI
         print("Installing OpenMPI via Homebrew...")
         result = self.run_command(f"{brew_cmd} install open-mpi", check=False)
         
         if result.returncode != 0:
-            print("Installing OpenMPI from apt as fallback...")
-            self.run_sudo_command("apt-get update")
-            self.run_sudo_command("apt-get install -y openmpi-bin openmpi-common libopenmpi-dev")
+            print(f"Installing OpenMPI from {self.pkg_manager} as fallback...")
+            if self.pkg_manager == 'dnf':
+                self.run_sudo_command("dnf install -y openmpi openmpi-devel")
+            else:
+                self.run_sudo_command("apt-get update")
+                self.run_sudo_command("apt-get install -y openmpi-bin openmpi-common libopenmpi-dev")
+        else:
+            # Ensure OpenMPI is linked (in case it was installed but not linked)
+            print("Ensuring OpenMPI is linked...")
+            link_result = self.run_command(f"{brew_cmd} link open-mpi", check=False)
+            if link_result.returncode == 0:
+                print("✓ OpenMPI linked successfully")
+            else:
+                # If linking failed, it might already be linked
+                print("OpenMPI linking status checked")
+            
+            # Verify mpicc can find the compiler
+            print("Verifying mpicc compiler detection...")
+            mpicc_test = self.run_command(f"{homebrew_bin}/mpicc --version", check=False)
+            if mpicc_test.returncode == 0:
+                print("✓ mpicc working correctly")
+            else:
+                print("⚠️  mpicc may have issues - check compiler symlinks")
         
-        print("OpenMPI installation completed")
+        print("OpenMPI, GCC, and CMake installation completed")
+
+    def configure_firewall_for_mpi(self):
+        """Configure firewall to allow MPI ports (50000-50200)"""
+        print("\n=== Configuring Firewall for MPI ===")
+        
+        # MPI port range: 50000-50200
+        # BTL TCP: 50000+
+        # OOB TCP: 50100-50200
+        
+        if self._is_wsl():
+            print("⚠️  WSL detected - Linux firewall configuration skipped")
+            print("   WSL requires Windows Firewall configuration")
+            print("   Run in PowerShell as Administrator:")
+            print("   .\\configure_wsl_firewall.ps1")
+            return
+        
+        # Check for Ubuntu/Debian (ufw)
+        if self.pkg_manager == 'apt-get':
+            # Check if ufw is installed and enabled
+            ufw_status = self.run_command("ufw status", check=False)
+            if ufw_status.returncode == 0 and "Status: active" in ufw_status.stdout:
+                print("UFW firewall detected and active")
+                print("Opening MPI ports 50000-50200...")
+                self.run_sudo_command("ufw allow 50000:50200/tcp comment 'OpenMPI PRRTE'")
+                print("✓ UFW configured for MPI")
+            else:
+                print("UFW not active or not installed - skipping firewall configuration")
+        
+        # Check for Red Hat/CentOS/Fedora (firewalld)
+        elif self.pkg_manager == 'dnf':
+            # Check if firewalld is running
+            firewalld_status = self.run_command("systemctl is-active firewalld", check=False)
+            if firewalld_status.returncode == 0 and "active" in firewalld_status.stdout:
+                print("firewalld detected and active")
+                print("Opening MPI ports 50000-50200...")
+                self.run_sudo_command("firewall-cmd --permanent --add-port=50000-50200/tcp")
+                self.run_sudo_command("firewall-cmd --reload")
+                print("✓ firewalld configured for MPI")
+            else:
+                print("firewalld not active - skipping firewall configuration")
+        
+        print("Firewall configuration completed")
 
     def install_openmp(self):
         """Install OpenMP (libomp) using Homebrew"""
@@ -703,9 +1172,12 @@ rm -f $SUDO_ASKPASS
         result = self.run_command(f"{brew_cmd} install libomp", check=False)
 
         if result.returncode != 0:
-            print("Installing OpenMP from apt as fallback...")
-            self.run_sudo_command("apt-get update")
-            self.run_sudo_command("apt-get install -y libomp-dev")
+            print(f"Installing OpenMP from {self.pkg_manager} as fallback...")
+            if self.pkg_manager == 'dnf':
+                self.run_sudo_command("dnf install -y libomp libomp-devel")
+            else:
+                self.run_sudo_command("apt-get update")
+                self.run_sudo_command("apt-get install -y libomp-dev")
 
         print("OpenMP installation completed")
 
@@ -862,23 +1334,99 @@ Waittime=0
         return "btl_tcp_if_include = eth1"
 
     def configure_openmpi(self):
-        """Configure OpenMPI for the cluster"""
-        print("\n=== Configuring OpenMPI ===")
+        """Configure OpenMPI for the cluster
         
-        # Create hostfile for MPI
-        hostfile_content = f"{self.master_ip} slots=4\n"
-        for worker_ip in self.worker_ips:
-            hostfile_content += f"{worker_ip} slots=4\n"
+        OpenMPI Installation (via Homebrew):
+        - Installation path: /home/linuxbrew/.linuxbrew/
+        - Binary path: /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8/bin/mpirun
+        - Prefix: /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8
+        
+        Usage with --prefix flag (recommended):
+          mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \\
+                 --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./program
+        
+        Creates three hostfiles:
+        1. hostfile - Standard (4 slots/node)
+        2. hostfile_optimal - Recommended (1 slot/node) for MPI+OpenMP
+        3. hostfile_max - Maximum (auto-detected cores/node) for pure MPI
+        """
+        print("\n=== Configuring OpenMPI ===")
         
         mpi_dir = Path.home() / ".openmpi"
         mpi_dir.mkdir(exist_ok=True)
         
+        # Create multiple hostfiles for different use cases
+        all_nodes = [self.master_ip] + self.worker_ips
+        
+        # 1. Standard hostfile with 4 slots per node (for multiple MPI processes per node)
+        hostfile_standard = ""
+        for node_ip in all_nodes:
+            hostfile_standard += f"{node_ip} slots=4\n"
+        
         hostfile_path = mpi_dir / "hostfile"
         with open(hostfile_path, 'w') as f:
-            f.write(hostfile_content)
+            f.write(hostfile_standard)
         
-        print(f"OpenMPI hostfile created at {hostfile_path}")
-        print(f"Content:\n{hostfile_content}")
+        print(f"✓ Standard hostfile created: {hostfile_path}")
+        print(f"  Usage: Multiple MPI processes per node (up to 4)")
+        
+        # 2. Optimal hostfile with 1 slot per node (recommended for MPI+OpenMP)
+        hostfile_optimal = ""
+        for node_ip in all_nodes:
+            hostfile_optimal += f"{node_ip} slots=1\n"
+        
+        hostfile_optimal_path = mpi_dir / "hostfile_optimal"
+        with open(hostfile_optimal_path, 'w') as f:
+            f.write(hostfile_optimal)
+        
+        print(f"✓ Optimal hostfile created: {hostfile_optimal_path}")
+        print(f"  Usage: 1 MPI process per node + max OpenMP threads (RECOMMENDED)")
+        
+        # 3. Max slots hostfile based on detected cores (if available)
+        try:
+            hostfile_max = ""
+            for node_ip in all_nodes:
+                # Try to detect cores via SSH if we have password
+                if self.password and node_ip != self.master_ip:
+                    import tempfile
+                    try:
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_pass:
+                            temp_pass.write(self.password)
+                            temp_pass_path = temp_pass.name
+                        
+                        cmd = f'sshpass -f {temp_pass_path} ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} "nproc" 2>/dev/null'
+                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                        os.unlink(temp_pass_path)
+                        
+                        if result.returncode == 0:
+                            cores = int(result.stdout.strip())
+                            hostfile_max += f"{node_ip} slots={cores}\n"
+                        else:
+                            hostfile_max += f"{node_ip} slots=16\n"  # Default fallback
+                    except:
+                        hostfile_max += f"{node_ip} slots=16\n"
+                else:
+                    # For master node, detect locally
+                    try:
+                        cores = int(subprocess.run(['nproc'], capture_output=True, text=True).stdout.strip())
+                        hostfile_max += f"{node_ip} slots={cores}\n"
+                    except:
+                        hostfile_max += f"{node_ip} slots=16\n"
+            
+            hostfile_max_path = mpi_dir / "hostfile_max"
+            with open(hostfile_max_path, 'w') as f:
+                f.write(hostfile_max)
+            
+            print(f"✓ Maximum slots hostfile created: {hostfile_max_path}")
+            print(f"  Usage: Maximum MPI processes based on detected cores")
+        except Exception as e:
+            print(f"⚠ Could not create max slots hostfile: {e}")
+        
+        print(f"\nHostfile summary:")
+        print(f"  {hostfile_path} - Standard (4 slots/node)")
+        print(f"  {hostfile_optimal_path} - Optimal (1 slot/node + OpenMP)")
+        if (mpi_dir / "hostfile_max").exists():
+            print(f"  {mpi_dir / 'hostfile_max'} - Maximum (all cores/node)")
 
         # Auto-detect network interface or use IP range
         # Try to find the network interface that has the master_ip
@@ -888,9 +1436,17 @@ Waittime=0
         # Note: Port ranges help with firewall configuration
         # btl_tcp_port_min_v4 sets starting port for BTL TCP communication
         # oob_tcp_port_range sets port range for out-of-band communication (PRRTE)
+        
+        # Set wrapper compiler to use Homebrew's gcc-11 symlink (which points to gcc-15)
+        # Set prefix so OpenMPI can find prted and other binaries on remote nodes
         mca_params = f"""# OpenMPI MCA parameters
 btl = ^openib
 {network_config}
+
+# OpenMPI installation prefix - critical for finding prted on remote nodes
+# This tells mpirun where to find OpenMPI binaries via SSH
+orte_prefix = /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8
+opal_prefix = /home/linuxbrew/.linuxbrew
 
 # Port configuration for firewall-friendly operation
 # BTL (Byte Transfer Layer) TCP ports
@@ -911,6 +1467,12 @@ oob_tcp_port_range = 50100-50200
     def verify_installation(self):
         """Verify that all components are installed correctly"""
         print("\n=== Verifying Installation ===")
+
+        # Ensure Homebrew is in PATH for verification
+        homebrew_path = "/home/linuxbrew/.linuxbrew/bin"
+        if os.path.exists(homebrew_path):
+            original_path = os.environ.get('PATH', '')
+            os.environ['PATH'] = f"{homebrew_path}:/home/linuxbrew/.linuxbrew/sbin:{original_path}"
 
         checks = [
             ("SSH", "ssh -V"),
@@ -988,6 +1550,7 @@ oob_tcp_port_range = 50100-50200
             self.install_slurm()
             self.install_openmpi()
             self.install_openmp()
+            self.configure_firewall_for_mpi()
             self.configure_slurm()
             self.configure_openmpi()
             self.verify_installation()
@@ -996,50 +1559,79 @@ oob_tcp_port_range = 50100-50200
             print("LOCAL NODE SETUP COMPLETED SUCCESSFULLY")
             print("=" * 60)
             
-            # If this is the master node and we have a password, offer to setup workers
+            # If we have a password and multiple nodes, offer to setup all other nodes
+            # This works whether run from master or a worker node
             workers_setup_success = False
-            if self.is_master and self.password and config_file and self.worker_ips:
-                workers_setup_success = self.setup_all_workers(config_file)
+            other_nodes_setup_success = False
+            other_nodes = []
+            
+            if self.password and config_file:
+                # Setup all nodes except the current one
+                if not self.is_master:
+                    # Running from worker, also setup master
+                    other_nodes.append(self.master_ip)
+                # Add all workers except current node
+                for worker_ip in self.worker_ips:
+                    # Get current node's IP to exclude it
+                    try:
+                        import socket
+                        hostname = socket.gethostname()
+                        local_ip = socket.gethostbyname(hostname)
+                        # Also check all network interfaces
+                        result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, check=False)
+                        if result.returncode == 0:
+                            import re
+                            ip_pattern = r'inet\s+(\d+\.\d+\.\d+\.\d+)'
+                            found_ips = re.findall(ip_pattern, result.stdout)
+                            if worker_ip not in found_ips:
+                                other_nodes.append(worker_ip)
+                        elif worker_ip != local_ip:
+                            other_nodes.append(worker_ip)
+                    except:
+                        # If we can't determine, just add all workers
+                        other_nodes.append(worker_ip)
+                
+                if other_nodes:
+                    print(f"\n=== Setting up other cluster nodes from this node ===")
+                    other_nodes_setup_success = self.setup_all_workers(config_file, other_nodes)
             
             # Final summary
             print("\n" + "=" * 60)
             print("CLUSTER SETUP SUMMARY")
             print("=" * 60)
             
-            if self.is_master:
-                if workers_setup_success:
-                    print("✓ Master node setup completed")
-                    print("✓ All worker nodes setup completed automatically")
-                    print("\nYour cluster is ready!")
-                    print("\nNext steps:")
-                    print("1. Test Slurm with: sinfo")
-                    print("2. Test OpenMPI with: mpirun -np 2 hostname")
-                elif self.password and config_file and self.worker_ips:
-                    print("✓ Master node setup completed")
-                    print("⚠ Some worker nodes failed automatic setup")
-                    print("\nNext steps:")
-                    print("1. Manually setup failed worker nodes")
-                    print("2. Test Slurm with: sinfo")
-                    print("3. Test OpenMPI with: mpirun -np 2 hostname")
-                elif self.password:
-                    print("✓ Master node setup completed")
-                    print("✓ SSH keys copied to worker nodes")
-                    print("\nNext steps:")
-                    print("1. Run this script on each worker node:")
-                    print(f"   python cluster_setup.py --config <config_file>")
-                    print("2. Test Slurm with: sinfo")
-                    print("3. Test OpenMPI with: mpirun -np 2 hostname")
-                else:
-                    print("✓ Master node setup completed")
-                    print("\nNext steps:")
-                    print("1. Copy SSH keys to worker nodes manually, or")
-                    print("   Re-run with --password flag for automatic setup")
-                    print("2. Run this script on each worker node")
-                    print("3. Test Slurm with: sinfo")
-                    print("4. Test OpenMPI with: mpirun -np 2 hostname")
+            # Show appropriate summary based on what was done
+            node_type = "Master" if self.is_master else "Worker"
+            print(f"✓ {node_type} node (this node) setup completed")
+            
+            if other_nodes_setup_success:
+                print(f"✓ All other cluster nodes setup completed automatically")
+                print("\nYour entire cluster is ready!")
+                print("\nNext steps:")
+                print("1. Test Slurm with: sinfo")
+                print("2. Test OpenMPI with: mpirun -np 2 hostname")
+                print("3. Submit test job: sbatch test_job.sh")
+            elif other_nodes and not other_nodes_setup_success:
+                print(f"⚠ Some cluster nodes failed automatic setup")
+                print("\nNext steps:")
+                print("1. Check failed nodes and setup manually if needed")
+                print("2. Test Slurm with: sinfo")
+                print("3. Test OpenMPI with: mpirun -np 2 hostname")
+            elif self.password and config_file:
+                print(f"✓ This node is configured")
+                print("\nNext steps:")
+                print("1. Run this script on other nodes with --password flag, or")
+                print(f"   Run from any node: python cluster_setup.py --config <config> --password")
+                print("2. Test Slurm with: sinfo")
+                print("3. Test OpenMPI with: mpirun -np 2 hostname")
             else:
-                print("✓ Worker node setup completed")
-                print("\nThis worker is now part of the cluster")
+                print(f"✓ This node is configured")
+                print("\nNext steps:")
+                print("1. Setup other cluster nodes:")
+                print(f"   python cluster_setup.py --config <config_file> --password")
+                print("   (Can be run from any node in the cluster)")
+                print("2. Test Slurm with: sinfo")
+                print("3. Test OpenMPI with: mpirun -np 2 hostname")
             
             print("=" * 60)
             
@@ -1062,7 +1654,7 @@ def load_yaml_config(path: str) -> Dict:
 def main():
     """Main entry point for the cluster setup script"""
     parser = argparse.ArgumentParser(
-        description="Cluster Setup Script for Slurm and OpenMPI on Ubuntu/WSL",
+        description="Cluster Setup Script for Slurm and OpenMPI on Ubuntu/WSL and Red Hat/CentOS/Fedora",
         epilog="Example: python cluster_setup.py --config cluster_config.yaml --password"
     )
     parser.add_argument(
@@ -1100,9 +1692,16 @@ def main():
     workers = config.get('workers')
     username = config.get('username')
     
+    # Handle new format where master and workers contain IP and OS info
+    if isinstance(master, dict):
+        master = master.get('ip')
+    
     # Normalize workers if provided as string in YAML
     if isinstance(workers, str):
         workers = workers.split()
+    elif isinstance(workers, list) and workers and isinstance(workers[0], dict):
+        # Extract IPs from list of dicts
+        workers = [w.get('ip') if isinstance(w, dict) else w for w in workers]
     
     # Validate presence
     if not master or not workers:
@@ -1113,6 +1712,13 @@ def main():
         print("    - 192.168.1.101")
         print("    - 192.168.1.102")
         print("  username: myuser  # optional")
+        print("\nOr with OS information:")
+        print("  master:")
+        print("    ip: 192.168.1.100")
+        print("    os: ubuntu")
+        print("  workers:")
+        print("    - ip: 192.168.1.101")
+        print("      os: ubuntu")
         sys.exit(1)
     
     # Validate IP addresses

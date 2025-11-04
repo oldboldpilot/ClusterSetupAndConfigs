@@ -6,7 +6,7 @@ This script automates the setup of a Slurm/OpenMPI cluster across multiple nodes
 
 ## Prerequisites
 
-- **Python 3.13** (via Homebrew)
+- **Python 3.14** (via Homebrew)
 - **uv** package manager
 - **Network access** to all cluster nodes
 - **Sudo access** on all nodes (with password)
@@ -14,18 +14,43 @@ This script automates the setup of a Slurm/OpenMPI cluster across multiple nodes
 
 ## Critical Requirements
 
-### 1. Run from the Master Node
+### 1. Run from ANY Node (Master or Worker)
 
-**The script MUST be executed from the master node specified in your YAML configuration.**
+**The script can be executed from ANY node in your cluster!**
 
-The script automatically detects which node it's running on by checking local IP addresses against the `master_ip` in the config file.
+The script automatically detects which node it's running on by checking all local network interfaces against the master/worker IPs in the config file.
 
 - ✅ **If run from master**: Automatically sets up all worker nodes via SSH
-- ⚠️ **If run from worker**: Only configures the local worker node
+- ✅ **If run from worker**: Automatically sets up master AND all other worker nodes via SSH
+- 🔍 **Auto-Detection**: Uses `ip addr` to find all local IPs and match against config
 
-### 2. Verify Your Node
+**Node Detection Process:**
+1. Script reads master_ip and worker_ips from config
+2. Checks all network interfaces with `ip addr show`
+3. Compares found IPs: "Am I the master? Or which worker am I?"
+4. Creates list of "other nodes" (all nodes EXCEPT current one)
+5. Sets up all other nodes automatically
 
-Before running the script, verify you're on the correct node:
+**Example:**
+- Cluster: master=192.168.1.147, workers=[192.168.1.139, 192.168.1.96, 192.168.1.136]
+- You run from worker 192.168.1.136
+- Script detects: "I'm worker 136"
+- Script sets up: 192.168.1.147 (master), 192.168.1.139 (worker), 192.168.1.96 (worker)
+
+### 2. Multi-OS Support
+
+**Supported Operating Systems:**
+- Ubuntu / Debian → uses `apt-get`
+- Red Hat Enterprise Linux (RHEL) → uses `dnf`
+- CentOS → uses `dnf`
+- Fedora → uses `dnf`
+- WSL2 with any of the above
+
+The script automatically detects the OS on each node and uses the appropriate package manager.
+
+### 3. Check Your Node (Optional)
+
+To see which node you're on:
 
 ```bash
 # Check your local IP addresses
@@ -33,10 +58,11 @@ ip addr show | grep "inet "
 
 # Example output:
 #   inet 127.0.0.1/8 scope host lo
-#   inet 192.168.1.10/24 brd 192.168.1.255 scope global eth0
+#   inet 192.168.1.136/24 brd 192.168.1.255 scope global eth0
+#   inet 192.168.1.138/24 brd 192.168.1.255 scope global eth1
 ```
 
-Compare the output with the `master_ip` in your configuration file. You should see the master IP in the list.
+The script will automatically detect your node, but this is useful for verification.
 
 ## Quick Start
 
@@ -55,15 +81,42 @@ uv sync
 
 ### 2. Create Configuration File
 
-Create a YAML file (e.g., `cluster_config.yaml`):
+Create a YAML file (e.g., `cluster_config.yaml`). The script supports two formats:
 
+**Simple Format:**
 ```yaml
-master_ip: "192.168.1.10"
-worker_ips:
-  - "192.168.1.11"
-  - "192.168.1.12"
-username: "your_username"
+master: 192.168.1.10
+workers:
+  - 192.168.1.11
+  - 192.168.1.12
+username: your_username
 ```
+
+**Extended Format (with OS information - Recommended for Multi-OS):**
+```yaml
+master:
+  ip: 192.168.1.10
+  os: ubuntu wsl2
+  name: master-node
+workers:
+  - ip: 192.168.1.11
+    os: ubuntu
+    name: worker1
+  - ip: 192.168.1.12
+    os: redhat  # Red Hat worker - script will use dnf instead of apt-get
+    name: worker2-redhat
+  - ip: 192.168.1.13
+    os: ubuntu
+    name: worker3
+username: your_username
+```
+
+Both formats work identically. The extended format is recommended for:
+- Multi-OS clusters (Ubuntu + Red Hat)
+- Better documentation
+- Easier identification of nodes
+
+**Note:** The `os` field is for documentation only. The script automatically detects the actual OS on each node during setup.
 
 ### 3. Run the Setup
 
@@ -102,31 +155,47 @@ The UI will:
 
 ## What the Script Does
 
-### On Master Node
+### On Current Node (Where You Run It)
 
-1. **Homebrew Installation**: Installs package manager if not present
-2. **SSH Setup**: Configures SSH server and client
-3. **SSH Key Distribution**: Generates keys and copies to all workers using sshpass
-4. **Hosts File**: Updates `/etc/hosts` with cluster node names
-5. **Slurm Installation**: Installs via Homebrew
-6. **OpenMPI Installation**: Installs via Homebrew
-7. **Slurm Configuration**: Creates slurm.conf, slurmdbd.conf, cgroup.conf
-8. **OpenMPI Configuration**: Creates hostfile with all nodes
-9. **Worker Setup**: SSHs to each worker and runs complete setup remotely
+1. **Node Detection**: Identifies which node it's running on (master or which worker)
+2. **OS Detection**: Identifies Ubuntu/Debian or Red Hat/CentOS/Fedora
+3. **Package Manager Selection**: Automatically uses apt-get or dnf
+4. **Homebrew Installation**: Installs package manager if not present
+5. **SSH Setup**: Configures SSH server and client with OS-appropriate packages
+   - Ubuntu: `openssh-client`, `openssh-server`
+   - Red Hat: `openssh-clients`, `openssh-server`
+6. **SSH Key Distribution**: Generates keys and copies to all OTHER nodes using sshpass
+7. **Hosts File**: Updates `/etc/hosts` with cluster node names
+8. **Slurm Installation**: Installs via Homebrew with OS-appropriate package
+   - Ubuntu: `slurm-wlm`
+   - Red Hat: `slurm`
+9. **OpenMPI Installation**: Installs via Homebrew
+10. **OpenMP Installation**: Installs libomp for thread-level parallelism
+11. **Slurm Configuration**: Creates slurm.conf, slurmdbd.conf, cgroup.conf (on master)
+12. **OpenMPI Configuration**: Creates **three hostfiles** with all nodes:
+    - `~/.openmpi/hostfile` - Standard (4 slots/node)
+    - `~/.openmpi/hostfile_optimal` - Recommended (1 slot/node) ⭐
+    - `~/.openmpi/hostfile_max` - Maximum (auto-detected cores/node)
+13. **Other Node Setup**: SSHs to each other node and runs complete setup remotely
 
-### On Worker Nodes (Automatic)
+### On Other Nodes (Automatic Remote Setup)
 
-When run from master, the script automatically:
+**When run from master:** Sets up all workers
+**When run from worker:** Sets up master AND all other workers
 
-1. Copies the setup script and config to each worker
+The script automatically:
+
+1. Copies the setup script and config to each other node
 2. Creates a wrapper script for sudo password handling
-3. SSHs to the worker and executes the full setup remotely in non-interactive mode
+3. SSHs to the other node and executes the full setup remotely in non-interactive mode
 4. Monitors progress and reports any errors in real-time
 
-Each worker receives:
+Each other node receives:
+- OS detection (Ubuntu vs Red Hat)
+- Package manager selection (apt-get vs dnf)
 - Homebrew installation
 - SSH configuration (with `--non-interactive` flag to skip prompts)
-- Slurm worker configuration
+- Slurm configuration (master or worker role depending on node)
 - OpenMPI configuration
 - Hosts file updates
 - Automatic confirmation of sudo access requirements
@@ -378,11 +447,29 @@ brew install open-mpi@4
 
 #### WSL-Specific Issues and SOLUTION
 
-**Problem**: Windows port forwarding to WSL only covers port 22 (SSH), not MPI ports (50000-50200), causing PRRTE daemon communication to hang.
+**Problem**: Windows port forwarding to WSL only covers port 22 (SSH), not MPI ports (50000-50200), causing PRRTE daemon communication to hang. Additionally, WSL's default NAT mode isolates it from other cluster nodes.
 
-**SOLUTION - Windows Firewall Configuration**:
+**SOLUTION**:
 
-We provide PowerShell scripts to fix this issue:
+**Step 0: Enable WSL Mirrored Mode Networking** (REQUIRED FIRST):
+
+Create or edit `.wslconfig` in your Windows home directory (`C:\Users\<YourUsername>\.wslconfig`):
+
+```ini
+[wsl2]
+networkingMode = mirrored
+```
+
+After creating/editing this file, restart WSL:
+```powershell
+wsl --shutdown
+```
+
+**Why mirrored mode is required**:
+- Default NAT mode gives WSL an internal IP (e.g., 172.x.x.x) that's not accessible from other nodes
+- Mirrored mode gives WSL the same IP as your Windows host on the physical network
+- This allows other cluster nodes to communicate with the WSL node directly
+- Without mirrored mode, firewall rules alone won't fix cluster communication
 
 **Step 1: Configure Windows Firewall** (Recommended, persists across reboots):
 ```powershell
@@ -458,8 +545,13 @@ Enable detailed output by checking the debug messages:
 After setup, key files are located at:
 
 - **Slurm configs**: `/etc/slurm/slurm.conf`, `/etc/slurm/cgroup.conf`
-- **OpenMPI hostfile**: `~/.openmpi/hostfile`
+- **OpenMPI hostfiles**: 
+  - `~/.openmpi/hostfile` - Standard (4 slots/node)
+  - `~/.openmpi/hostfile_optimal` - Recommended (1 slot/node) ⭐
+  - `~/.openmpi/hostfile_max` - Maximum (auto-detected cores/node)
 - **OpenMPI MCA params**: `~/.openmpi/mca-params.conf` (includes port configuration)
+- **OpenMPI binary**: `/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8/bin/mpirun`
+- **OpenMPI prefix**: `/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8`
 - **SSH keys**: `~/.ssh/id_rsa`, `~/.ssh/id_rsa.pub`
 - **Slurm spool**: `/var/spool/slurm/ctld` (master), `/var/spool/slurm/d` (all nodes)
 - **Slurm logs**: `/var/log/slurm/`
@@ -476,5 +568,5 @@ After setup, key files are located at:
 See `CLAUDE.md` and `copilot-instructions.md` for detailed instructions on:
 - WSL-specific issues and solutions
 - uv package manager configuration
-- Python 3.13 requirements
+- Python 3.14 requirements
 - Common troubleshooting scenarios

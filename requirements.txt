@@ -3,7 +3,7 @@
 # 
 # To install dependencies:
 #   export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
-#   uv sync --python /home/linuxbrew/.linuxbrew/bin/python3.13
+#   uv sync --python /home/linuxbrew/.linuxbrew/bin/python3.14
 #
 # Or using pip (if uv is not available):
 #   pip install -r requirements.txt

@@ -1,18 +1,20 @@
 # ClusterSetupAndConfigs
 
-Automated cluster setup and configuration scripts for Slurm and OpenMPI on Ubuntu/WSL systems using Python 3.13 and uv.
+Automated cluster setup and configuration scripts for Slurm and OpenMPI on Ubuntu/WSL and Red Hat systems using Python 3.14 and uv.
 
 ## Features
 
-- **Pure Python Implementation**: Written entirely in Python 3.13 for easy customization and maintenance
+- **Pure Python Implementation**: Written entirely in Python 3.14 for easy customization and maintenance
 - **Automated Installation**: Installs and configures Homebrew, Slurm, OpenMPI, and OpenSSH
 - **Cluster-Ready**: Configures master and worker nodes for distributed computing
-- **Ubuntu/WSL Support**: Works on both native Ubuntu Linux and Windows Subsystem for Linux (WSL)
+- **Run from Any Node**: Setup entire cluster from master OR any worker node - automatic detection
+- **Multi-OS Support**: Works on Ubuntu Linux, WSL with Ubuntu, Red Hat, CentOS, and Fedora
+- **Smart Package Manager Detection**: Automatically uses apt-get (Ubuntu/Debian) or dnf (Red Hat/CentOS/Fedora)
 
 ## Requirements
 
-- Python 3.13+ (installed via Homebrew)
-- Ubuntu Linux or WSL with Ubuntu installed
+- Python 3.14+ (installed via Homebrew)
+- Ubuntu Linux, WSL with Ubuntu, Red Hat, CentOS, or Fedora
 - uv package manager
 - Sudo access on all nodes
 - Network connectivity between all cluster nodes
@@ -25,7 +27,7 @@ If you're an AI agent (Claude, Copilot, etc.) or a developer working on this pro
 
 These files contain critical information about:
 - WSL symlink issues and solutions
-- uv setup with Python 3.13
+- uv setup with Python 3.14
 - Environment variable requirements
 - Common pitfalls and solutions
 
@@ -33,16 +35,26 @@ These files contain critical information about:
 
 ### Prerequisites
 
-1. **Install Python 3.13 via Homebrew**:
+1. **Supported Operating Systems**:
+   - Ubuntu/Debian (uses apt-get)
+   - Red Hat Enterprise Linux (RHEL)
+   - CentOS
+   - Fedora
+   - (dnf-based distributions)
+   - WSL2 with any of the above
+   
+   The script automatically detects your OS and uses the correct package manager.
+
+2. **Install Python 3.14 via Homebrew**:
 ```bash
 # Install Homebrew if not already installed
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# Install Python 3.13
-brew install python@3.13
+# Install Python 3.14
+brew install python@3.14
 ```
 
-2. **Install uv package manager**:
+3. **Install uv package manager**:
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
@@ -77,28 +89,38 @@ source ~/.bashrc
 
 ### Alternative: Using venv directly
 
-### Important: Run from Master Node
+### Important: Run from ANY Node (Master or Worker)
 
-**The script MUST be run from the master node** specified in your YAML config file. The script automatically detects which node it's running on by checking local IP addresses.
+**The script can run from ANY node in your cluster!** It automatically detects which node it's running on and sets up all other nodes:
 
-- If you run from the master node, it will set up all worker nodes automatically
-- If you run from a worker node, it will only configure that local worker
+- **Running from master:** Sets up all worker nodes
+- **Running from worker:** Sets up master AND all other workers
+- **Automatic Detection:** Uses IP address matching to identify current node
 
-Check which node you're on with:
+**How Node Detection Works:**
 ```bash
-ip addr show | grep inet
+# The script checks all local network interfaces
+ip addr show | grep "inet "
+
+# Compares found IPs against master_ip and worker_ips in config
+# Automatically identifies: "I'm the master" or "I'm worker node X"
+# Then sets up all OTHER nodes
 ```
 
-Compare the output with your master_ip in the config file.
+**Example:**
+- Your cluster: master=192.168.1.147, workers=[192.168.1.139, 192.168.1.96, 192.168.1.136]
+- You SSH to worker 192.168.1.136 and run the script
+- Script detects: "I'm on worker 136"
+- Script will setup: master 192.168.1.147, worker 139, worker 96 (all nodes EXCEPT 136)
 
 If you encounter issues with uv on WSL:
 
 ```bash
-# Ensure Python 3.13 is available
-python3.13 --version
+# Ensure Python 3.14 is available
+python3.14 --version
 
 # Create a virtual environment in home directory (avoids WSL symlink issues)
-python3.13 -m venv --copies ~/.venv/cluster-setup
+python3.14 -m venv --copies ~/.venv/cluster-setup
 
 # Activate the environment
 source ~/.venv/cluster-setup/bin/activate
@@ -114,22 +136,22 @@ python cluster_setup.py --help
 
 **Problem**: `Operation not permitted (os error 1)` when creating venv
 
-**Solution**: WSL can't create symlinks on Windows filesystems. Always use:
+**Problem**: WSL can't create symlinks on Windows filesystems. Always use:
 - `export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup` before running `uv sync`
-- Or create venv in Linux home directory with `python3.13 -m venv --copies`
+- Or create venv in Linux home directory with `python3.14 -m venv --copies`
 
-**Problem**: `python3.13` not found
+**Problem**: `python3.14` not found
 
 **Solution**: 
 ```bash
-# Check if Python 3.13 is installed via Homebrew
-/home/linuxbrew/.linuxbrew/bin/python3.13 --version
+# Check if Python 3.14 is installed via Homebrew
+/home/linuxbrew/.linuxbrew/bin/python3.14 --version
 
 # Add Homebrew to PATH
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
 # Or use full path
-uv python pin /home/linuxbrew/.linuxbrew/bin/python3.13
+uv python pin /home/linuxbrew/.linuxbrew/bin/python3.14
 ```
 
 ## Usage
@@ -139,40 +161,92 @@ uv python pin /home/linuxbrew/.linuxbrew/bin/python3.13
 For detailed deployment instructions, troubleshooting, and best practices, see:
 - **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)** - Comprehensive deployment and usage guide
 
-### ⚠️ Critical Requirement: Run from Master Node
+### ✨ Run from ANY Node
 
-**The script MUST be executed from the master node** specified in your configuration file. The script automatically detects which node it's running on by checking local IP addresses.
+**The script can be executed from ANY node in your cluster** - master or worker. The script automatically:
+- Detects which node it's running on by checking local IP addresses
+- Detects the operating system (Ubuntu/Debian or Red Hat/CentOS/Fedora)
+- Selects the appropriate package manager (apt-get or dnf)
+- Sets up the current node first
+- Then sets up all other nodes in the cluster via SSH (when using --password flag)
 
-Check your current node:
+**Running from any node example:**
+```bash
+# SSH to ANY node in your cluster
+ssh user@192.168.1.11  # Could be master or any worker
+
+# Clone and setup entire cluster from this one node
+git clone https://github.com/oldboldpilot/ClusterSetupAndConfigs.git
+cd ClusterSetupAndConfigs
+python cluster_setup.py --config cluster_config.yaml --password
+# The script will detect this node and setup all others automatically
+```
+
+**Verify your current node:**
 ```bash
 # See all your local IP addresses
 ip addr show | grep "inet "
-
-# The output should include the master_ip from your config file
+# The script will detect which node you're on automatically
 ```
 
 ### Configuration File
 
-The script requires a YAML configuration file containing cluster node information.
+The script requires a YAML configuration file containing cluster node information. The script supports **two formats**: simple (IP strings) and extended (with OS and hostname information).
+
+#### Simple Format (Backward Compatible)
 
 Create a configuration file (e.g., `cluster_config.yaml`):
 
 ```yaml
-master_ip: "192.168.1.10"
-worker_ips:
-  - "192.168.1.11"
-  - "192.168.1.12"
-username: "ubuntu"
+master: 192.168.1.10
+workers:
+  - 192.168.1.11
+  - 192.168.1.12
+username: ubuntu  # optional
 
 # OpenMP thread configuration (optional)
 # Maximum threads available per node - use 'nproc' to determine
 threads:
   192.168.1.10: 32  # master node
   192.168.1.11: 16  # worker1
-  192.168.1.12: 16   # worker2
+  192.168.1.12: 16  # worker2
 ```
 
-**Note:** The `threads` section is optional but recommended for hybrid MPI+OpenMP programs. It documents the maximum thread count available on each node.
+#### Extended Format (With OS and Hostname Information)
+
+For better documentation and multi-OS support:
+
+```yaml
+master:
+  ip: 192.168.1.10
+  os: ubuntu wsl2
+  name: master-node  # optional
+
+workers:
+  - ip: 192.168.1.11
+    os: ubuntu
+    name: worker1  # optional
+  - ip: 192.168.1.12
+    os: ubuntu
+    name: worker2  # optional
+  - ip: 192.168.1.13
+    os: redhat
+    name: worker3  # optional
+
+username: ubuntu  # optional
+
+# OpenMP thread configuration (optional)
+threads:
+  192.168.1.10: 32  # master: 16 cores × 2 threads/core
+  192.168.1.11: 16  # worker1: 8 cores × 2 threads/core
+  192.168.1.12: 16  # worker2: 8 cores × 2 threads/core
+  192.168.1.13: 88  # worker3: 44 cores × 2 threads/core
+```
+
+**Note:** 
+- The `threads` section is optional but recommended for hybrid MPI+OpenMP programs. It documents the maximum thread count available on each node.
+- The `os` and `name` fields in the extended format are optional and used for documentation purposes.
+- Both formats work identically - the script automatically detects and handles both.
 
 ### Automatic Full Cluster Setup (Recommended)
 
@@ -187,9 +261,19 @@ You'll be prompted to enter the password for the worker nodes. The script will t
 2. Generate and copy SSH keys to all worker nodes
 3. **Automatically connect to each worker node via SSH**
 4. **Run the full setup on each worker node remotely**
-5. Configure the entire cluster end-to-end
+5. **Distribute SSH keys between ALL nodes** (so any node can SSH to any other)
+6. **Distribute OpenMPI MCA configuration to all nodes** (for consistent MPI settings)
+7. Configure the entire cluster end-to-end
 
 This means you **only need to run the command once** on the master node, and the entire cluster will be configured automatically!
+
+**Key Features**:
+- ✅ **Cross-node SSH**: All nodes can SSH to each other without passwords (required for MPI from any node)
+- ✅ **Multi-IP Support**: Automatically detects and configures SSH keys for nodes with multiple network interfaces
+- ✅ **Full SSH Mesh**: Every node can connect to every other node via any of their IP addresses
+- ✅ **Consistent MPI Settings**: OpenMPI MCA parameters distributed to all nodes automatically
+- ✅ **MPICH Detection**: Automatically removes MPICH if found (incompatible with OpenMPI)
+- ✅ **OpenMPI Linking**: Ensures OpenMPI is properly linked on all nodes
 
 #### How to Know When Setup is Complete
 
@@ -236,26 +320,46 @@ python cluster_setup.py --help
 ### Complete Example
 
 For a cluster with:
-- Master node: 192.168.1.10
-- Worker nodes: 192.168.1.11, 192.168.1.12
+- Master node: 192.168.1.10 (Ubuntu)
+- Worker nodes: 192.168.1.11 (Ubuntu), 192.168.1.12 (Red Hat)
 - Username: ubuntu
 
-1. **Verify you're on the master node**:
+**You can run from ANY node - the script auto-detects:**
 ```bash
-ip addr show | grep "inet " | grep 192.168.1.10
-# Should see output if you're on the master node
+# Check which node you're on
+ip addr show | grep "inet "
+# The script will automatically detect your node and setup all others
 ```
 
-2. Create `cluster_config.yaml`:
+2. Create `cluster_config.yaml` (recommended extended format for multi-OS):
+
+**Extended Format (Recommended for Multi-OS):**
 ```yaml
-master_ip: "192.168.1.10"
-worker_ips:
-  - "192.168.1.11"
-  - "192.168.1.12"
-username: "ubuntu"
+master:
+  ip: 192.168.1.10
+  os: ubuntu wsl2
+  name: master-node
+workers:
+  - ip: 192.168.1.11
+    os: ubuntu
+    name: worker1
+  - ip: 192.168.1.12
+    os: redhat  # Red Hat automatically uses dnf instead of apt-get
+    name: worker2-redhat
+username: ubuntu
 ```
 
-3. Run on master node with automatic full cluster setup:
+**Or Simple Format (Still Works):**
+```yaml
+master: 192.168.1.10
+workers:
+  - 192.168.1.11
+  - 192.168.1.12
+username: ubuntu
+# Note: Script will auto-detect OS on each node
+```
+
+3. Run from ANY node with automatic full cluster setup:
 ```bash
 export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 uv run python cluster_setup.py --config cluster_config.yaml --password
@@ -285,34 +389,59 @@ pdsh -w 192.168.1.[147,137,96] hostname
 
 The cluster setup script performs the following operations:
 
-1. **Node Detection**: Automatically detects if running on master or worker node by comparing local IPs
-2. **Homebrew Installation**: Installs Homebrew package manager on Ubuntu/WSL
-3. **SSH Setup**:
+1. **Node Detection**: Automatically detects which node it's running on by checking all network interfaces against master/worker IPs in config
+2. **OS Detection**: Automatically identifies Ubuntu/Debian (apt-get) or Red Hat/CentOS/Fedora (dnf) and uses appropriate package manager
+3. **Homebrew Installation**: Installs Homebrew package manager on Ubuntu/WSL or Red Hat systems
+4. **SSH Setup**:
    - Installs OpenSSH client and server
    - Generates SSH keys for passwordless authentication
    - Automatically copies SSH keys to worker nodes (with `--password` flag)
    - Uses secure password handling via stdin piping (no command-line exposure)
-4. **Automatic Worker Setup** (when run from master with `--password`):
+5. **Automatic Other-Node Setup** (with `--password` flag):
+   - When run from master: Sets up all workers
+   - When run from worker: Sets up master AND all other workers
    - Creates wrapper scripts for sudo password handling
-   - Copies setup script and config to each worker via SSH
-   - Remotely executes full setup on all worker nodes
+   - Copies setup script and config to each node via SSH
+   - Remotely executes full setup on all other nodes
    - Monitors progress and reports any errors
-5. **Hosts File Configuration**: Updates `/etc/hosts` with all cluster node information
-6. **Slurm Installation**: Installs Slurm workload manager via Homebrew
-7. **OpenMPI Installation**: Installs OpenMPI for distributed memory parallel computing
-8. **OpenMP Installation**: Installs OpenMP (libomp) for shared memory parallel computing
+6. **Hosts File Configuration**: Updates `/etc/hosts` with all cluster node information
+7. **Slurm Installation**: 
+   - Ubuntu: Installs `slurm-wlm` via Homebrew
+   - Red Hat: Installs `slurm` via Homebrew
+8. **OpenMPI Installation**: 
+   - Installs GCC 15.2.0 from Homebrew for C/C++23 compilation
+   - Installs CMake (latest version from Homebrew) for build automation
+   - Creates gcc-11 symlinks pointing to gcc-15 (OpenMPI's prebuilt bottles expect gcc-11)
+   - Installs `openmpi` for distributed memory parallel computing
+   - Sets compiler environment variables (CC, CXX, FC, OMPI_CC, OMPI_CXX, OMPI_FC) to use Homebrew GCC
+   - Configures .bashrc and .ssh/environment to always use Homebrew compilers
+   - Verifies mpicc can find and use the Homebrew GCC compiler
+9. **OpenMP Installation**: Installs OpenMP (libomp) for shared memory parallel computing
    - Provides compiler support for `-fopenmp` flag
    - Enables thread-level parallelism within a single node
-9. **Slurm Configuration**:
+10. **Firewall Configuration**: Automatically configures firewall for MPI communication
+   - **Ubuntu/Debian**: Configures UFW (if active) to allow ports 50000-50200
+   - **Red Hat/CentOS/Fedora**: Configures firewalld (if active) to allow ports 50000-50200
+   - **WSL**: Displays instructions for Windows Firewall configuration
+   - Ports: BTL TCP (50000+), OOB TCP (50100-50200) for PRRTE daemon communication
+11. **Slurm Configuration**:
    - Creates necessary directories (`/var/spool/slurm`, `/var/log/slurm`, etc.)
    - Generates `slurm.conf` with cluster topology
    - Configures cgroup support
    - Starts Slurm services (slurmctld on master, slurmd on all nodes)
-10. **OpenMPI Configuration**:
-    - Creates MPI hostfile with all cluster nodes
+12. **OpenMPI Configuration**:
+    - **Installation**: OpenMPI installed via Homebrew at `/home/linuxbrew/.linuxbrew/`
+    - **Binary Path**: `/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8/bin/mpirun`
+    - **Prefix**: `/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8`
+    - Creates **three MPI hostfiles** with all cluster nodes (see [OpenMPI Hostfiles](#openmpi-hostfiles))
     - Configures MCA parameters for cross-cluster communication
     - Sets up network interface parameters
-11. **Verification**: Tests all installed components
+    - **Usage**: Use `--prefix` flag with mpirun for consistent execution:
+      ```bash
+      mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+             --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./my_program
+      ```
+13. **Verification**: Tests all installed components
 
 ## Post-Installation Steps
 
@@ -346,9 +475,108 @@ The script creates and manages the following configuration files:
 - `/etc/hosts` - Cluster node hostnames and IPs
 - `/etc/slurm/slurm.conf` - Slurm cluster configuration
 - `/etc/slurm/cgroup.conf` - Cgroup configuration for Slurm
-- `~/.openmpi/hostfile` - OpenMPI node list
 - `~/.openmpi/mca-params.conf` - OpenMPI parameters
+- `~/.openmpi/hostfile*` - Three MPI hostfiles for different use cases
+
+### OpenMPI Installation Details
+
+**Homebrew Installation Path**: `/home/linuxbrew/.linuxbrew/`
+
+**OpenMPI Version**: 5.0.8 (or latest available)
+
+**Key Binaries**:
+- `mpirun` / `mpiexec`: `/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8/bin/mpirun`
+- `mpicc` / `mpic++`: MPI compiler wrappers
+- Libraries: `/home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8/lib/`
+
+**Using the Prefix Flag**:
+The `--prefix` flag ensures all nodes use the same OpenMPI installation:
+```bash
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./program
+```
+
+**Why Prefix is Important**:
+- Ensures consistent MPI library versions across heterogeneous nodes
+- Prevents MPICH/OpenMPI conflicts
+- Required when multiple MPI implementations exist on the system
+- Avoids "orted" daemon version mismatches
 - `~/.ssh/config` - SSH client configuration
+
+### OpenMPI Hostfiles
+
+The setup script automatically creates **three different hostfiles** for different use cases:
+
+#### 1. `~/.openmpi/hostfile` - Standard (4 slots per node)
+For running multiple MPI processes per node:
+```
+192.168.1.139 slots=4
+192.168.1.96 slots=4
+192.168.1.136 slots=4
+192.168.1.147 slots=4
+```
+
+**Usage:**
+```bash
+# Run 12 MPI processes distributed across 4 nodes (3 per node)
+mpirun --map-by node -np 12 --hostfile ~/.openmpi/hostfile ./my_program
+```
+
+#### 2. `~/.openmpi/hostfile_optimal` - Optimal (1 slot per node) ⭐ **RECOMMENDED**
+For optimal MPI+OpenMP hybrid parallelism:
+```
+192.168.1.139 slots=1
+192.168.1.96 slots=1
+192.168.1.136 slots=1
+192.168.1.147 slots=1
+```
+
+**Usage:**
+```bash
+# Run 1 MPI process per node with maximum OpenMP threads
+# This is the RECOMMENDED configuration for most workloads
+unset OMP_NUM_THREADS  # Let OpenMP auto-detect max threads
+mpirun --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./my_program
+```
+
+**Benefits:**
+- ✅ Minimizes expensive MPI communication overhead
+- ✅ Maximizes efficient shared-memory parallelism via OpenMP
+- ✅ Automatically uses all available threads on each node
+- ✅ Simplifies process mapping and load balancing
+- ✅ Best performance for most HPC applications
+
+#### 3. `~/.openmpi/hostfile_max` - Maximum (auto-detected cores per node)
+For maximum MPI parallelism (cores detected automatically):
+```
+192.168.1.139 slots=16
+192.168.1.96 slots=16
+192.168.1.136 slots=88
+192.168.1.147 slots=32
+```
+
+**Usage:**
+```bash
+# Run maximum MPI processes based on available cores
+# Total: 16+16+88+32 = 152 processes
+mpirun --map-by node -np 152 --hostfile ~/.openmpi/hostfile_max ./my_program
+```
+
+**When to use:** When your application requires fine-grained MPI parallelism and minimal per-process memory usage.
+
+### Choosing the Right Hostfile
+
+| Hostfile | Use Case | MPI Processes | OpenMP Threads | Best For |
+|----------|----------|---------------|----------------|----------|
+| `hostfile` | Standard | 4 per node | Manual config | Balanced MPI/OpenMP |
+| `hostfile_optimal` ⭐ | **Recommended** | 1 per node | All available | Most applications |
+| `hostfile_max` | Maximum MPI | All cores | Minimal/None | Pure MPI codes |
+
+**Quick Recommendation:**
+- **New to hybrid MPI+OpenMP?** Use `hostfile_optimal`
+- **Need domain decomposition?** Use `hostfile_optimal` (1 domain per node)
+- **Pure MPI application?** Use `hostfile_max`
+- **Custom requirements?** Use `hostfile` and adjust slots
 
 ## Troubleshooting
 
@@ -370,6 +598,134 @@ ip addr show | grep "inet "
 # If your master IP isn't listed, either:
 # 1. Update the config file with correct master_ip
 # 2. Run the script from the actual master node
+```
+
+### MPI Processes Only Running on One Node
+
+**Problem**: All MPI processes run on the head node even with a hostfile or `--host` flag
+
+**Symptoms**:
+```bash
+# You run this:
+mpirun -np 12 --hostfile ~/.openmpi/hostfile ./my_program
+
+# But all 12 processes run on the master node only
+# Expected: Processes distributed across all nodes in hostfile
+```
+
+**Root Cause**: OpenMPI 5.x default behavior changed - it fills each node sequentially instead of round-robin
+
+**Solution**: **ALWAYS use `--map-by node` flag** for cross-cluster distribution:
+
+```bash
+# CORRECT - Distributes processes across nodes:
+mpirun -np 12 --map-by node --hostfile ~/.openmpi/hostfile ./my_program
+
+# WRONG - All processes run on first node:
+mpirun -np 12 --hostfile ~/.openmpi/hostfile ./my_program
+```
+
+**How it works:**
+- **Without `--map-by node`**: OpenMPI fills slots on each node completely before moving to next
+  - Example with 3 nodes (4 slots each), 12 processes:
+    - Node 1: Gets 4 processes
+    - Node 2: Gets 4 processes  
+    - Node 3: Gets 4 processes
+    - BUT if Node 1 has more detected cores, it may get ALL 12!
+
+- **With `--map-by node`**: Round-robin distribution across nodes
+  - Example with 3 nodes, 12 processes:
+    - Node 1: Gets processes 0, 3, 6, 9
+    - Node 2: Gets processes 1, 4, 7, 10
+    - Node 3: Gets processes 2, 5, 8, 11
+
+**Verification:**
+```bash
+# Add hostname output to see distribution:
+mpirun -np 12 --map-by node --hostfile ~/.openmpi/hostfile hostname
+
+# Should show a mix of all hostnames, not just one
+```
+
+**Alternative**: Use `--map-by ppr:N:node` to specify exact processes per node:
+```bash
+# 4 processes per node:
+mpirun -np 12 --map-by ppr:4:node --hostfile ~/.openmpi/hostfile ./my_program
+```
+
+### Optimal MPI + OpenMP Distribution Strategy
+
+**Recommended Approach**: Use **one MPI process per node** with **maximum OpenMP threads per node**
+
+This strategy maximizes performance by:
+- Minimizing expensive MPI communication overhead
+- Maximizing shared-memory parallelism via OpenMP
+- Avoiding memory contention between MPI processes
+- Simplifying process mapping
+
+**Example Configuration**:
+
+For a 4-node cluster with varying core counts:
+- Node 1: 16 cores (32 threads with hyperthreading)
+- Node 2: 16 cores (32 threads)
+- Node 3: 44 cores (88 threads)
+- Node 4: 16 cores (32 threads)
+
+```bash
+# Create hostfile with 1 slot per node
+cat > hostfile << EOF
+192.168.1.139 slots=1
+192.168.1.96 slots=1
+192.168.1.136 slots=1
+192.168.1.147 slots=1
+EOF
+
+# Run with 1 MPI process per node, max OpenMP threads
+export OMP_NUM_THREADS=32  # Or set per-node in script
+
+# 4 MPI processes total (1 per node), each with max threads
+mpirun --map-by node \
+       -np 4 \
+       --hostfile hostfile \
+       -x OMP_NUM_THREADS=32 \
+       ./my_hybrid_program
+
+# For per-node thread control:
+mpirun --map-by node -np 4 --hostfile hostfile \
+       --host 192.168.1.139 -x OMP_NUM_THREADS=32 : \
+       --host 192.168.1.96 -x OMP_NUM_THREADS=32 : \
+       --host 192.168.1.136 -x OMP_NUM_THREADS=88 : \
+       --host 192.168.1.147 -x OMP_NUM_THREADS=32 \
+       ./my_hybrid_program
+```
+
+**When to Use Multiple MPI Processes Per Node**:
+- Application requires more MPI parallelism
+- Working with distributed data that doesn't fit in single node memory
+- Benchmarking different MPI/OpenMP ratios
+
+```bash
+# Example: 2 MPI processes per node, half threads each
+cat > hostfile << EOF
+192.168.1.139 slots=2
+192.168.1.96 slots=2
+192.168.1.136 slots=2
+192.168.1.147 slots=2
+EOF
+
+export OMP_NUM_THREADS=16  # Half the cores for each MPI process
+mpirun --map-by node -np 8 --hostfile hostfile ./my_program
+```
+
+**Verification**:
+```bash
+# Test distribution with the test program
+export OMP_NUM_THREADS=32
+mpirun --map-by node -np 4 --hostfile hostfile /tmp/test_mpi_omp
+
+# Should see:
+# - 4 MPI ranks (0-3), one per hostname
+# - Each rank showing many OpenMP threads (up to max cores)
 ```
 
 ### SSH Issues
@@ -487,6 +843,130 @@ sinfo
 - Similar socket-based communication requirements as PRRTE
 - Exhibits same cross-cluster failures on WSL
 
+### MPI Implementation Compatibility
+
+**CRITICAL**: All nodes in the cluster MUST use the same MPI implementation.
+
+**Problem**: MPICH and OpenMPI are incompatible - they cannot communicate with each other in a cluster.
+
+**Symptoms**:
+- `PRTE has lost communication with a remote daemon`
+- MPI jobs hang or fail immediately when trying to use multiple nodes
+- Error messages about unknown MPI commands or options
+- `mpirun` behaves differently on different nodes
+
+**Root Cause**: 
+- Homebrew may install MPICH by default on some systems
+- OpenMPI and MPICH have different internal protocols and cannot interoperate
+- Even with same version numbers, they use completely different communication mechanisms
+
+**Solution** (Automated):
+The setup script now automatically:
+1. Checks for MPICH installation on each node
+2. Uninstalls MPICH if found
+3. Installs and links OpenMPI
+4. Verifies all nodes have OpenMPI 5.0.8
+
+**Manual Check**:
+```bash
+# Check which MPI implementation is installed
+ls -la /home/linuxbrew/.linuxbrew/bin/mpirun
+
+# Should show: -> ../Cellar/open-mpi/5.0.8/bin/mpirun
+# NOT: -> ../Cellar/mpich/4.3.2/bin/mpirun
+
+# If you see MPICH, uninstall it and link OpenMPI:
+brew uninstall mpich
+brew link open-mpi
+```
+
+### Multi-Interface Network Nodes
+
+**Problem**: Nodes with multiple network interfaces on the same subnet cause MPI communication failures.
+
+**Symptoms**:
+- `PRTE has lost communication with a remote daemon`
+- MPI works locally but fails when trying to communicate with remote nodes
+- Debug output shows daemon trying to connect to multiple IP addresses
+- Error: "Unable to connect to remote daemon"
+
+**Root Cause**:
+- OpenMPI's PRTE daemon advertises all available IP addresses
+- When a node has multiple interfaces (e.g., ens1f0 and ens1f1) on the same subnet
+- Remote nodes get confused about which IP to connect back to
+- The daemon may listen on one interface but advertise both IPs
+
+**Detection**:
+```bash
+# Check if a node has multiple interfaces on the same subnet
+ip addr show | grep "inet " | grep -v 127.0.0.1
+
+# Example problematic output:
+#   inet 192.168.1.136/24 ... ens1f0
+#   inet 192.168.1.138/24 ... ens1f1  <- Multiple IPs on same subnet!
+```
+
+**Solution**:
+Configure OpenMPI to use only one specific interface by editing `~/.openmpi/mca-params.conf`:
+
+```conf
+# Specify which interface to use
+oob_tcp_if_include = ens1f0  # Use your primary interface name
+btl_tcp_if_include = ens1f0
+
+# Or use IP/netmask notation:
+oob_tcp_if_include = 192.168.1.136/32  # Specific IP
+btl_tcp_if_include = 192.168.1.136/32
+```
+
+Find your primary interface:
+```bash
+# Show default route to determine primary interface
+ip route show default
+
+# Output example:
+# default via 192.168.1.1 dev ens1f0 proto dhcp src 192.168.1.136 metric 100
+#                               ^^^^^^ This is your primary interface
+
+# Check interface speeds to choose highest throughput
+ethtool ens1f0 | grep Speed
+ethtool ens1f1 | grep Speed
+
+# Example output:
+#   Speed: 10000Mb/s  <- ens1f0 is 10 Gbps
+#   Speed: 1000Mb/s   <- ens1f1 is 1 Gbps
+
+# Or check all interfaces:
+for iface in $(ls /sys/class/net/ | grep -v lo); do
+    echo -n "$iface: "
+    ethtool $iface 2>/dev/null | grep Speed || echo "N/A"
+done
+```
+
+**Performance Tip**: When multiple interfaces are available, **always configure OpenMPI to use the highest throughput interface** for MPI communication:
+- **10 Gbps** (10000 Mb/s) is preferred over 1 Gbps for inter-node MPI traffic
+- Use faster interface for `oob_tcp_if_include` and `btl_tcp_if_include`
+- Slower interfaces can be used for SSH/management traffic
+- This significantly improves MPI message passing performance
+
+**Automatic Multi-IP Detection**:
+
+The setup script (as of November 2025) automatically:
+- Detects all IP addresses on each node during setup
+- Distributes SSH keys that work for all detected IPs
+- Creates a full mesh where any node can SSH to any IP of any other node
+
+When running with `--password`, you'll see:
+```
+Detecting all IP addresses on 192.168.1.136...
+  Found IPs: 192.168.1.136, 192.168.1.138
+Distributing 192.168.1.139's key to 192.168.1.136 (all 2 IP(s))...
+  ✓ Added 192.168.1.139's key to 192.168.1.136
+    This key will work for all IPs: 192.168.1.136, 192.168.1.138
+```
+
+**Note**: While SSH keys are distributed for all IPs, you still need to configure MCA parameters to specify which interface OpenMPI should use for communication.
+
 **Port Requirements for OpenMPI**:
 The script now configures the following ports in `~/.openmpi/mca-params.conf`:
 - **BTL TCP ports**: Starting from port 50000 (`btl_tcp_port_min_v4 = 50000`)
@@ -502,7 +982,31 @@ sudo ufw allow 50000:50200/tcp comment 'OpenMPI PRRTE'
 
 For **WSL** - **CRITICAL CONFIGURATION REQUIRED**:
 
-Windows Firewall and WSL Hyper-V VM settings block MPI communication by default. We provide PowerShell scripts to configure everything:
+Windows Firewall and WSL Hyper-V VM settings block MPI communication by default. Additionally, **WSL must be configured to use mirrored mode networking** for the cluster to function properly.
+
+**Step 1: Enable WSL Mirrored Mode Networking**
+
+Create or edit `.wslconfig` in your Windows home directory (`C:\Users\<YourUsername>\.wslconfig`):
+
+```ini
+[wsl2]
+networkingMode = mirrored
+```
+
+After creating/editing this file, restart WSL:
+```powershell
+wsl --shutdown
+```
+
+**Why mirrored mode is required**: 
+- In default NAT mode, WSL uses an internal IP address that's not accessible from other cluster nodes
+- Mirrored mode gives your WSL instance the same IP address as your Windows host
+- This allows other nodes in your cluster to communicate with the WSL node directly
+- Without mirrored mode, the cluster cannot route MPI traffic to/from the WSL node
+
+**Step 2: Configure Firewall Rules**
+
+We provide PowerShell scripts to configure Windows Firewall and WSL Hyper-V settings:
 
 ```powershell
 # Open PowerShell as Administrator on Windows, navigate to project directory
@@ -859,6 +1363,108 @@ Worker Node 2 (192.168.1.12)
 ├── slurmd (Slurm daemon)
 └── OpenMPI
 ```
+
+## Validation and Testing
+
+### Production Cluster Test Results (November 2025)
+
+#### Test 1: Multi-Process Distribution (16 MPI Processes)
+
+Successfully validated full 4-node heterogeneous cluster with all critical fixes:
+
+**Test Configuration**:
+- **Node 1**: 192.168.1.139 (Ubuntu 24.04, single NIC) - 4 MPI ranks
+- **Node 2**: 192.168.1.96 (Ubuntu 24.04, single NIC) - 4 MPI ranks  
+- **Node 3**: 192.168.1.136 (Red Hat 9.5, dual NIC) - 4 MPI ranks
+- **Node 4**: 192.168.1.147 (Ubuntu 24.04 WSL2) - 4 MPI ranks
+
+**Test Command**:
+```bash
+export OMP_NUM_THREADS=2
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node \
+       -np 16 \
+       --hostfile /tmp/hostfile \
+       /tmp/test_mpi_omp
+```
+
+**Results**: ✅ **All 16 MPI processes perfectly distributed** with round-robin mapping across all 4 nodes, OpenMP threads active, full cross-cluster communication working.
+
+#### Test 2: Optimal MPI+OpenMP Distribution ⭐ **RECOMMENDED**
+
+**Test Configuration**:
+- **Node 1**: 192.168.1.139 (Ubuntu 24.04) - 16 threads available
+- **Node 2**: 192.168.1.96 (Ubuntu 24.04) - 16 threads available  
+- **Node 3**: 192.168.1.136 (Red Hat 9.5, dual NIC) - 44 threads available
+- **Node 4**: 192.168.1.147 (Ubuntu 24.04 WSL2) - 32 threads available
+
+**Test Command**:
+```bash
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node \
+       -np 4 \
+       --hostfile ~/.openmpi/hostfile_optimal \
+       /tmp/test_mpi_omp
+```
+
+**Distribution Results**:
+```
+MPI Rank 0: muyiwadroexperiments       → 16 OpenMP threads
+MPI Rank 1: oluubuntul1                → 16 OpenMP threads  
+MPI Rank 2: oluwasanmiredhatserver     → 44 OpenMP threads
+MPI Rank 3: DESKTOP-3SON9JT            → 32 OpenMP threads
+```
+
+**Results**: ✅ **Optimal distribution achieved**
+- Total: 4 MPI processes using 108 threads (16+16+44+32)
+- 1 MPI process per node minimizes inter-node communication
+- Each process uses ALL available threads on its node
+- Maximizes shared-memory parallelism within each node
+- Perfect for heterogeneous clusters with varying core counts
+
+**Performance Benefits**:
+- ✓ Minimal MPI message passing overhead
+- ✓ Maximum OpenMP parallel efficiency  
+- ✓ Optimal for applications with large shared-memory regions
+- ✓ Scales perfectly across heterogeneous hardware
+
+**Validated Features**:
+1. ✅ MPICH detection and automatic removal
+2. ✅ OpenMPI 5.0.8 with --prefix flag on all nodes
+3. ✅ Full SSH key mesh distribution (all nodes ↔ all nodes)
+4. ✅ Multi-IP SSH support (dual-NIC Red Hat node)
+5. ✅ MCA configuration distributed to all nodes
+6. ✅ Multi-interface network handling (10 Gbps + 1 Gbps)
+7. ✅ Three hostfiles created automatically (standard, optimal, max)
+8. ✅ `--map-by node` ensuring even process distribution
+9. ✅ WSL node successfully participating in cluster
+10. ✅ Heterogeneous OS mix (Ubuntu + Red Hat + WSL)
+11. ✅ Optimal MPI+OpenMP configuration validated
+
+**Performance**: Process distribution completed successfully with no PRTE daemon communication failures or routing issues.
+
+### Test Your Cluster
+
+After setup, verify your cluster with the provided C++23 MPI+OpenMP test:
+
+```bash
+# Compile test program (done automatically by setup script)
+# Or manually:
+mpic++ -std=c++23 -fopenmp -o /tmp/test_mpi_omp mpi_test.cpp
+
+# Run on full cluster (always use --map-by node!)
+export OMP_NUM_THREADS=4
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node \
+       -np 12 \
+       --hostfile /tmp/hostfile \
+       /tmp/test_mpi_omp
+
+# Verify distribution (should show round-robin across nodes)
+mpirun --map-by node -np 12 --hostfile /tmp/hostfile hostname
+```
+
+**Expected Output**: You should see MPI ranks distributed evenly across all nodes with OpenMP threads running on each.
 
 ## Contributing
 

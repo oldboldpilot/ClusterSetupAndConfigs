@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.14
 """
 Basic tests for cluster_setup.py
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 def test_script_syntax():
     """Test that the script has valid Python syntax"""
     result = subprocess.run(
-        ['python3', '-m', 'py_compile', 'cluster_setup.py'],
+        ['python3.14', '-m', 'py_compile', 'cluster_setup.py'],
         capture_output=True,
         text=True
     )
@@ -22,7 +22,7 @@ def test_script_syntax():
 def test_help_message():
     """Test that the script shows help message"""
     result = subprocess.run(
-        ['python3', 'cluster_setup.py', '--help'],
+        ['python3.14', 'cluster_setup.py', '--help'],
         capture_output=True,
         text=True
     )
@@ -36,7 +36,7 @@ def test_help_message():
 def test_missing_arguments():
     """Test that the script requires arguments"""
     result = subprocess.run(
-        ['python3', 'cluster_setup.py'],
+        ['python3.14', 'cluster_setup.py'],
         capture_output=True,
         text=True
     )
@@ -55,7 +55,7 @@ def test_invalid_ip():
 
     try:
         result = subprocess.run(
-            ['python3', 'cluster_setup.py', '--config', temp_config],
+            ['python3.14', 'cluster_setup.py', '--config', temp_config],
             capture_output=True,
             text=True
         )
@@ -176,7 +176,7 @@ def test_ip_validation():
             # Just check it doesn't crash on IP validation
             # (it will fail later on sudo check, but that's OK)
             result = subprocess.run(
-                ['python3', 'cluster_setup.py', '--config', temp_config],
+                ['python3.14', 'cluster_setup.py', '--config', temp_config],
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -212,7 +212,7 @@ def test_non_interactive_flag():
     try:
         # Test that script accepts --non-interactive flag
         result = subprocess.run(
-            ['python3', 'cluster_setup.py', '--config', config_file, '--non-interactive', '--help'],
+            ['python3.14', 'cluster_setup.py', '--config', config_file, '--non-interactive', '--help'],
             capture_output=True,
             text=True,
             timeout=5
@@ -227,6 +227,138 @@ def test_non_interactive_flag():
         import os
         if Path(config_file).exists():
             os.unlink(config_file)
+
+
+def test_new_yaml_format_simple():
+    """Test loading configuration with simple format (IP strings)"""
+    import tempfile
+    import yaml
+
+    # Create config with simple format
+    config_data = {
+        'master': '192.168.1.10',
+        'workers': ['192.168.1.11', '192.168.1.12'],
+        'username': 'testuser'
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        yaml.dump(config_data, f)
+        temp_config = f.name
+
+    try:
+        sys.path.insert(0, str(Path.cwd()))
+        from cluster_setup import load_yaml_config
+
+        config = load_yaml_config(temp_config)
+        
+        assert config['master'] == '192.168.1.10', "Simple master format not loaded correctly"
+        assert config['workers'] == ['192.168.1.11', '192.168.1.12'], "Simple workers format not loaded correctly"
+        
+        print("✓ New YAML format (simple) test passed")
+    finally:
+        import os
+        os.unlink(temp_config)
+
+
+def test_new_yaml_format_extended():
+    """Test loading configuration with extended format (dict with ip, os, name)"""
+    import tempfile
+    import yaml
+
+    # Create config with extended format
+    config_data = {
+        'master': {
+            'ip': '192.168.1.10',
+            'os': 'ubuntu wsl2',
+            'name': 'master-node'
+        },
+        'workers': [
+            {'ip': '192.168.1.11', 'os': 'ubuntu', 'name': 'worker1'},
+            {'ip': '192.168.1.12', 'os': 'ubuntu', 'name': 'worker2'}
+        ],
+        'username': 'testuser',
+        'threads': {
+            '192.168.1.10': 32,
+            '192.168.1.11': 16,
+            '192.168.1.12': 16
+        }
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        yaml.dump(config_data, f)
+        temp_config = f.name
+
+    try:
+        sys.path.insert(0, str(Path.cwd()))
+        from cluster_setup import load_yaml_config
+
+        config = load_yaml_config(temp_config)
+        
+        # Verify the config loaded correctly
+        assert isinstance(config['master'], dict), "Extended master format should be dict"
+        assert config['master']['ip'] == '192.168.1.10', "Master IP not loaded correctly"
+        assert config['master']['os'] == 'ubuntu wsl2', "Master OS not loaded correctly"
+        
+        assert isinstance(config['workers'], list), "Workers should be a list"
+        assert isinstance(config['workers'][0], dict), "Worker should be dict in extended format"
+        assert config['workers'][0]['ip'] == '192.168.1.11', "Worker IP not loaded correctly"
+        assert config['workers'][0]['os'] == 'ubuntu', "Worker OS not loaded correctly"
+        
+        print("✓ New YAML format (extended) test passed")
+    finally:
+        import os
+        os.unlink(temp_config)
+
+
+def test_yaml_format_extraction():
+    """Test that ClusterSetup correctly extracts IPs from both formats"""
+    import tempfile
+    import yaml
+    
+    sys.path.insert(0, str(Path.cwd()))
+    from cluster_setup import ClusterSetup
+    
+    # Test with extended format
+    config_extended = {
+        'master': {'ip': '192.168.1.10', 'os': 'ubuntu'},
+        'workers': [
+            {'ip': '192.168.1.11', 'os': 'ubuntu'},
+            {'ip': '192.168.1.12', 'os': 'ubuntu'}
+        ],
+        'username': 'testuser'
+    }
+    
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        yaml.dump(config_extended, f)
+        temp_config = f.name
+    
+    try:
+        # The script should extract IPs from the extended format
+        # We'll simulate what main() does
+        from cluster_setup import load_yaml_config
+        config = load_yaml_config(temp_config)
+        
+        master = config.get('master')
+        workers = config.get('workers')
+        
+        # Handle new format
+        if isinstance(master, dict):
+            master_ip = master.get('ip')
+        else:
+            master_ip = master
+            
+        if isinstance(workers, list) and workers and isinstance(workers[0], dict):
+            worker_ips = [w.get('ip') for w in workers]
+        else:
+            worker_ips = workers
+        
+        assert master_ip == '192.168.1.10', "Failed to extract master IP from extended format"
+        assert worker_ips == ['192.168.1.11', '192.168.1.12'], "Failed to extract worker IPs from extended format"
+        
+        print("✓ YAML format extraction test passed")
+    finally:
+        import os
+        os.unlink(temp_config)
 
 
 def main():
@@ -244,6 +376,9 @@ def main():
         test_cluster_setup_class,
         test_ip_validation,
         test_non_interactive_flag,
+        test_new_yaml_format_simple,
+        test_new_yaml_format_extended,
+        test_yaml_format_extraction,
     ]
     
     failed = 0

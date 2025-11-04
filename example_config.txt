@@ -1,16 +1,55 @@
-# Example Cluster Configuration
+# Example Cluster Configuration (YAML format)
 # 
-# This file shows example IP addresses for a 3-node cluster
+# This file shows example configurations for a 3-node cluster
 # Replace these with your actual node IP addresses
 
-# Master node IP
-MASTER_IP=192.168.1.10
+# ============================================================
+# BASIC FORMAT (Simple IP addresses)
+# ============================================================
 
-# Worker node IPs (space-separated)
-WORKER_IPS="192.168.1.11 192.168.1.12"
+# cluster_config_simple.yaml
+master: 192.168.1.10
+workers:
+  - 192.168.1.11
+  - 192.168.1.12
+username: ubuntu  # optional
 
+# OpenMP thread configuration (optional)
+threads:
+  192.168.1.10: 32  # master node
+  192.168.1.11: 16  # worker1
+  192.168.1.12: 16  # worker2
+
+# ============================================================
+# EXTENDED FORMAT (With OS and hostname information)
+# ============================================================
+
+# cluster_config_extended.yaml
+master:
+  ip: 192.168.1.10
+  os: ubuntu wsl2
+  name: master-node  # optional
+
+workers:
+  - ip: 192.168.1.11
+    os: ubuntu
+    name: worker1  # optional
+  - ip: 192.168.1.12
+    os: redhat
+    name: worker2  # optional - example with Red Hat/CentOS/Fedora
+
+username: ubuntu  # optional
+
+# OpenMP thread configuration (optional)
+threads:
+  192.168.1.10: 32  # master: 16 cores × 2 threads/core
+  192.168.1.11: 16  # worker1: 8 cores × 2 threads/core
+  192.168.1.12: 16  # worker2: 8 cores × 2 threads/core
+
+# ============================================================
 # Example command to run the setup script:
-# python cluster_setup.py --master 192.168.1.10 --workers 192.168.1.11 192.168.1.12
+# ============================================================
+python cluster_setup.py --config cluster_config.yaml --password
 
-# For localhost testing (single machine):
-# python cluster_setup.py --master 127.0.0.1 --workers 127.0.0.2 127.0.0.3
+# The script supports BOTH formats automatically!
+# The 'os' and 'name' fields are optional and used for documentation

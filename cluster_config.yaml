@@ -1,14 +1,26 @@
-master: 192.168.1.10
+master:
+  ip: 192.168.1.10
+  os: ubuntu wsl2
+
 workers:
-  - 192.168.1.11
-  - 192.168.1.12
+  - ip: 192.168.1.11
+    os: ubuntu
+    name: worker1
+  - ip: 192.168.1.12
+    os: ubuntu
+    name: worker2
+  - ip: 192.168.1.13
+    os: redhat
+    name: worker3
+
 # Optional
 username: myuser
 
 # OpenMP thread configuration (optional)
 # Maximum threads available per node
-# Run 'nproc' on each node to determine the value
+# Use 'nproc' on each node to determine
 threads:
-  192.168.1.10: 32  # master node
-  192.168.1.11: 16  # worker1
-  192.168.1.12: 16  # worker2
+  192.168.1.10: 32  # master: 16 cores × 2 threads/core
+  192.168.1.11: 16  # worker1: 8 cores × 2 threads/core
+  192.168.1.12: 16  # worker2: 8 cores × 2 threads/core
+  192.168.1.13: 88  # worker3: 44 cores × 2 threads/core

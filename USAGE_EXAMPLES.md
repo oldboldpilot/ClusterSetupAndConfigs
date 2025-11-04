@@ -1,80 +1,166 @@
 # Usage Examples for Cluster Setup Script
 
-## Important: Node Detection
+## Important: Run from ANY Node!
 
-**The script automatically detects which node it's running on.** For automatic worker setup, you MUST run it from the master node.
+**The script can run from ANY node in your cluster** - master or any worker! It automatically detects which node it's running on and sets up all OTHER nodes.
 
-### Verify Your Node Before Running
+### How Node Detection Works
 
 ```bash
 # Check your local IP addresses
 ip addr show | grep "inet "
 
-# Example output:
+# Example output on worker node 192.168.1.136:
 #   inet 127.0.0.1/8 scope host lo
-#   inet 192.168.1.10/24 brd 192.168.1.255 scope global eth0
-#                ^ This should match your master_ip in config
+#   inet 192.168.1.136/24 brd 192.168.1.255 scope global eth0
+#   inet 192.168.1.138/24 brd 192.168.1.255 scope global eth1
 ```
 
 When you run the script, it will show:
 ```
-DEBUG: hostname='node1', local_ip='127.0.1.1', master_ip='192.168.1.10'
-DEBUG: Found IPs on interfaces: ['127.0.0.1', '192.168.1.10', '172.17.0.1']
-Current node is: MASTER  ← Should see this if on correct node
+DEBUG: hostname='worker-node', local_ip='192.168.1.138', master_ip='192.168.1.147'
+DEBUG: Found IPs on interfaces: ['127.0.0.1', '192.168.1.136', '192.168.1.138']
+Current node is: WORKER (192.168.1.136)
+Will setup these other nodes: ['192.168.1.147', '192.168.1.139', '192.168.1.96']
+              ← Script detects it's on worker and will setup master + other workers
 ```
+
+### Run from Master vs Worker
+
+**From Master Node:**
+- Detects: "I'm the master"
+- Sets up: All worker nodes
+
+**From Worker Node:**
+- Detects: "I'm worker X"
+- Sets up: Master node AND all other workers (excluding itself)
 
 ## Basic Setup
 
 ### Example 1: Simple 3-Node Cluster
 
-Create a configuration file `cluster_config.yaml`:
+Create a configuration file `cluster_config.yaml` (either format works):
 
+**Simple Format:**
 ```yaml
-master_ip: "192.168.1.10"
-worker_ips:
-  - "192.168.1.11"
-  - "192.168.1.12"
-username: "myuser"  # optional, defaults to current user
+master: 192.168.1.10
+workers:
+  - 192.168.1.11
+  - 192.168.1.12
+username: myuser  # optional, defaults to current user
 ```
 
-**Run from the master node (192.168.1.10)** with automatic setup:
+**Extended Format (with OS information - Recommended):**
+```yaml
+master:
+  ip: 192.168.1.10
+  os: ubuntu wsl2
+  name: master-node
+workers:
+  - ip: 192.168.1.11
+    os: ubuntu
+    name: worker1
+  - ip: 192.168.1.12
+    os: redhat  # Red Hat worker - will use dnf
+    name: worker2-redhat
+username: myuser
+```
+
+**Run from ANY node** with automatic setup:
 ```bash
+# SSH to ANY node (master or any worker)
+ssh myuser@192.168.1.11  # Could be 10, 11, or 12
+
 export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 uv run python cluster_setup.py --config cluster_config.yaml --password
-# Enter password when prompted - script will automatically setup all workers
+# Enter password when prompted - script will:
+# 1. Detect which node it's on
+# 2. Setup all OTHER nodes automatically
+# 3. Use apt-get on Ubuntu nodes, dnf on Red Hat nodes
 ```
 
 ### Example 2: Larger Cluster with 5 Workers
 
 Configuration file `large_cluster.yaml`:
 
+**Simple Format:**
 ```yaml
-master_ip: "10.0.0.10"
-worker_ips:
-  - "10.0.0.11"
-  - "10.0.0.12"
-  - "10.0.0.13"
-  - "10.0.0.14"
-  - "10.0.0.15"
-username: "admin"
+master: 10.0.0.10
+workers:
+  - 10.0.0.11
+  - 10.0.0.12
+  - 10.0.0.13
+  - 10.0.0.14
+  - 10.0.0.15
+username: admin
+```
+
+**Extended Format (Multi-OS Cluster):**
+```yaml
+master:
+  ip: 10.0.0.10
+  os: ubuntu wsl2
+  name: master-node
+workers:
+  - ip: 10.0.0.11
+    os: ubuntu
+    name: worker1-ubuntu
+  - ip: 10.0.0.12
+    os: ubuntu
+    name: worker2-ubuntu
+  - ip: 10.0.0.13
+    os: redhat  # Red Hat workers
+    name: worker3-redhat
+  - ip: 10.0.0.14
+    os: redhat
+    name: worker4-redhat
+  - ip: 10.0.0.15
+    os: ubuntu
+    name: worker5-ubuntu
+username: admin
+```
+
+**Note:** Script automatically detects OS on each node and uses:
+- Ubuntu/Debian nodes: `apt-get` for packages
+- Red Hat/CentOS/Fedora nodes: `dnf` for packages
 ```
 
 ```bash
-# MUST be run from 10.0.0.10 for automatic worker setup
+# Can be run from ANY node (master or any worker)
 export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 uv run python cluster_setup.py --config large_cluster.yaml --password
+
+# Example: Run from worker3-redhat (10.0.0.13)
+# Script will detect it's on worker3 and setup: master + worker1,2,4,5
 ```
 
 ### Example 3: Local Testing with Localhost
 
 Configuration file `local_test.yaml`:
 
+**Simple Format:**
 ```yaml
-master_ip: "localhost"
-worker_ips:
-  - "127.0.0.2"
-  - "127.0.0.3"
-username: "testuser"
+master: localhost
+workers:
+  - 127.0.0.2
+  - 127.0.0.3
+username: testuser
+```
+
+**Extended Format:**
+```yaml
+master:
+  ip: localhost
+  os: ubuntu wsl2
+  name: test-master
+workers:
+  - ip: 127.0.0.2
+    os: ubuntu
+    name: test-worker1
+  - ip: 127.0.0.3
+    os: ubuntu
+    name: test-worker2
+username: testuser
 ```
 
 ```bash
@@ -83,17 +169,39 @@ export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 uv run python cluster_setup.py --config local_test.yaml
 ```
 
-### Example 4: Manual Setup (Without Automatic Worker Setup)
+### Example 4: Running from Worker Node
+
+You can run the setup from ANY worker node, and it will setup master + all other workers:
+
+```bash
+# SSH to any worker (e.g., 192.168.1.12)
+ssh myuser@192.168.1.12
+
+# Clone the repo on this worker
+git clone https://github.com/oldboldpilot/ClusterSetupAndConfigs.git
+cd ClusterSetupAndConfigs
+
+# Run the setup - it will detect it's on worker2 and setup master + worker1
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_setup.py --config cluster_config.yaml --password
+
+# Output will show:
+# Current node is: WORKER (192.168.1.12)
+# Will setup these other nodes: ['192.168.1.10', '192.168.1.11']
+```
+
+### Example 5: Manual Setup (Without Automatic Other-Node Setup)
 
 If you prefer to setup each node manually without providing a password:
 
 ```bash
-# On master node (192.168.1.10)
+# On any node - run without --password flag
 export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 uv run python cluster_setup.py --config cluster_config.yaml
+# This will only setup the current node, not other nodes
 
-# Then manually on each worker node
-ssh worker1
+# Then manually on each other node
+ssh next-node
 cd /path/to/ClusterSetupAndConfigs
 export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 uv run python cluster_setup.py --config cluster_config.yaml
@@ -104,10 +212,11 @@ uv run python cluster_setup.py --config cluster_config.yaml
 ### 1. Prepare Your Cluster Nodes
 
 Ensure all nodes have:
-- Ubuntu Linux or WSL with Ubuntu
+- **Supported OS**: Ubuntu/Debian OR Red Hat/CentOS/Fedora (WSL2 supported)
 - Network connectivity
 - Same username on all nodes
 - Sudo access
+- Script automatically detects OS and uses apt-get or dnf
 
 ### 2. Create Configuration File
 
@@ -344,15 +453,15 @@ ip addr show | grep "inet "
 ```
 
 **Solution**:
-1. Verify the `master_ip` in your config file matches one of your local IPs
+1. Verify the master IP in your config file matches one of your local IPs
 2. If IPs don't match, update the config file with the correct master IP
 3. If you're not on the master node, SSH to the correct node and run from there
 
 **Example**:
 ```bash
-# Config says master_ip: "192.168.1.10"
+# Config says master IP: "192.168.1.10"
 # But your IPs are: ['127.0.0.1', '172.25.40.179', '10.1.96.192']
-# → master_ip not found in local IPs
+# → master IP not found in local IPs
 
 # Solution: Either update config or run from 192.168.1.10
 ssh 192.168.1.10
