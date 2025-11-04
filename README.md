@@ -49,10 +49,15 @@ Automated cluster setup and configuration scripts for Slurm and OpenMPI on Ubunt
 - Consistent API across all managers
 - Easy to extend with new managers
 
-✅ **Jinja2 Templates:**
-- Dynamic benchmark generation with configurable parameters
-- 7 templates: UPC++ latency/bandwidth, MPI, OpenSHMEM, Berkeley UPC, Makefile, run scripts
+✅ **Benchmark Generation with C++23:**
+- Automated benchmark generation in `~/cluster_build_sources/benchmarks/`
+- **C++23 standard** for UPC++ and MPI benchmarks with modern features:
+  - `std::ranges` for cleaner algorithm usage
+  - `std::reduce` for efficient aggregations
+  - Modern compiler optimizations (-std=c++23 -O3)
+- 7 Jinja2 templates: UPC++ latency/bandwidth, MPI, OpenSHMEM, Berkeley UPC, Makefile, run scripts
 - Flexible iterations, message sizes, warmup configurations
+- Compile with `make` and run with `./run_benchmarks.sh`
 
 ✅ **Testing:**
 - 118 total tests (102 passing, 16 expected failures for uninstalled components)

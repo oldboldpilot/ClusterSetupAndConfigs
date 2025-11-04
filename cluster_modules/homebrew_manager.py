@@ -176,8 +176,18 @@ class HomebrewManager:
             if result.returncode != 0:
                 print(f"⚠️  Failed to create symlink {target} -> {source}")
         
+        # Create compatibility symlinks for older GCC versions that PGAS libraries might expect
+        # This ensures tools like UPC++ that look for g++-11 will use our latest gcc-15
+        compat_versions = ['11', '12', '13', '14']  # Common legacy versions
+        for old_version in compat_versions:
+            for compiler in ['gcc', 'g++', 'gfortran']:
+                cmd = f"sudo ln -sf {self.homebrew_bin}/{compiler}-{gcc_version} {self.homebrew_bin}/{compiler}-{old_version}"
+                result = self._run_command(cmd, check=False)
+                # Silently continue if symlink creation fails (non-critical)
+        
         print(f"✓ Created compiler symlinks:")
         print(f"  gcc/g++/gfortran -> gcc-{gcc_version} (latest from Homebrew)")
+        print(f"  gcc-11/g++-11/etc -> gcc-{gcc_version} (compatibility for PGAS libraries)")
         return True
     
     def verify_gcc_installation(self) -> bool:

@@ -223,9 +223,15 @@ class ClusterSetup:
             print(f"{'='*70}")
             self.network_mgr.configure_firewall_local()
             
-            # STEP 8: Final Configuration and Verification (EIGHTH - finalize)
+            # STEP 8: Benchmark Generation (EIGHTH - create performance tests)
             print(f"\n{'='*70}")
-            print("STEP 8: Final Configuration and Verification")
+            print("STEP 8: Benchmark Generation")
+            print(f"{'='*70}")
+            self._generate_benchmarks()
+            
+            # STEP 9: Final Configuration and Verification (NINTH - finalize)
+            print(f"\n{'='*70}")
+            print("STEP 9: Final Configuration and Verification")
             print(f"{'='*70}")
             self._post_installation_fixes()
             self._verify_installation()
@@ -317,6 +323,77 @@ class ClusterSetup:
                 subprocess.run(['sudo', 'apt-get', 'update'], check=False)
                 subprocess.run(['sudo', 'apt-get', 'install', '-y', 
                               'openmpi-bin', 'openmpi-common', 'libopenmpi-dev'], check=False)
+    
+    def _generate_benchmarks(self):
+        """Generate PGAS and MPI benchmarks using BenchmarkManager"""
+        print("\n=== Generating Benchmarks ===")
+        
+        # Use existing cluster_build_sources directory for benchmarks
+        benchmark_dir = Path.home() / "cluster_build_sources" / "benchmarks"
+        benchmark_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Update benchmark manager's benchmark_dir
+        self.benchmark_mgr.benchmark_dir = benchmark_dir
+        
+        # Create src directory for source files
+        src_dir = benchmark_dir / "src"
+        src_dir.mkdir(exist_ok=True)
+        
+        print(f"Benchmark directory: {benchmark_dir}")
+        
+        # Generate UPC++ latency benchmark
+        print("\n→ Generating UPC++ latency benchmark...")
+        self.benchmark_mgr.create_upcxx_latency_benchmark(
+            iterations=1000,
+            warmup_iterations=100
+        )
+        
+        # Generate UPC++ bandwidth benchmark
+        print("→ Generating UPC++ bandwidth benchmark...")
+        self.benchmark_mgr.create_upcxx_bandwidth_benchmark(
+            iterations=1000,
+            message_sizes=[1024, 4096, 16384, 65536, 262144, 1048576]
+        )
+        
+        # Generate MPI latency benchmark
+        print("→ Generating MPI latency benchmark...")
+        self.benchmark_mgr.create_mpi_latency_benchmark(
+            iterations=1000,
+            warmup_iterations=100
+        )
+        
+        # Generate OpenSHMEM latency benchmark
+        print("→ Generating OpenSHMEM latency benchmark...")
+        self.benchmark_mgr.create_openshmem_latency_benchmark(
+            iterations=1000,
+            warmup_iterations=100
+        )
+        
+        # Generate Berkeley UPC latency benchmark
+        print("→ Generating Berkeley UPC latency benchmark...")
+        self.benchmark_mgr.create_berkeley_upc_latency_benchmark(
+            iterations=1000,
+            warmup_iterations=100
+        )
+        
+        # Generate Makefile
+        print("→ Generating Makefile...")
+        self.benchmark_mgr.create_makefile()
+        
+        # Generate run script
+        print("→ Generating run_benchmarks.sh...")
+        self.benchmark_mgr.create_run_script(num_procs=4)
+        
+        # Make run script executable
+        run_script = benchmark_dir / "run_benchmarks.sh"
+        if run_script.exists():
+            run_script.chmod(0o755)
+        
+        print(f"\n✓ All benchmarks generated in {benchmark_dir}")
+        print(f"\nTo compile and run:")
+        print(f"  cd {benchmark_dir}")
+        print(f"  make")
+        print(f"  ./run_benchmarks.sh")
     
     def _post_installation_fixes(self):
         """Post-installation symlink fixes and PATH verification"""

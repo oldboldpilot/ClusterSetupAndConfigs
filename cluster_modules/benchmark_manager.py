@@ -265,9 +265,9 @@ class BenchmarkManager:
             'mpi_compiler': 'mpicxx',
             'openshmem_compiler': 'oshcc',
             'berkeley_upc_compiler': 'upcc',
-            'upcxx_flags': '-O3',
-            'mpi_flags': '-O3',
-            'openshmem_flags': '-O3',
+            'upcxx_flags': '-std=c++23 -O3',
+            'mpi_flags': '-std=c++23 -O3',
+            'openshmem_flags': '-std=c++23 -O3',
             'berkeley_upc_flags': '-O3',
             'benchmarks': [
                 'upcxx_latency',
