@@ -5,8 +5,9 @@
 #   export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 #   uv sync --python /home/linuxbrew/.linuxbrew/bin/python3.14
 #
-# Or using pip (if uv is not available):
-#   pip install -r requirements.txt
+# This file is kept for reference only. Use pyproject.toml for actual dependencies.
 
 PyYAML>=6.0
 textual>=0.47.0
+mpi4py>=4.0.0
+jinja2>=3.1.0

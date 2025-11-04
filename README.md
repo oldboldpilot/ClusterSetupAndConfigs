@@ -4,19 +4,24 @@ Automated cluster setup and configuration scripts for Slurm and OpenMPI on Ubunt
 
 ## Features
 
+- **Modular Architecture**: Clean separation of concerns with dedicated manager modules for each component
 - **Pure Python Implementation**: Written entirely in Python 3.14 for easy customization and maintenance
 - **Comprehensive Parallel Programming Support**:
   - **OpenMPI 5.0.8**: Message Passing Interface for distributed computing
   - **OpenMP (libomp)**: Shared-memory thread-level parallelism
   - **UPC++ (Berkeley)**: Partitioned Global Address Space (PGAS) programming in C++
+  - **Berkeley UPC 2023.9.0**: Unified Parallel C with GASNet conduits
   - **GASNet**: High-performance communication system for PGAS languages
-  - **OpenSHMEM**: Symmetric memory access for parallel programming
+  - **Sandia OpenSHMEM 1.5.2**: Symmetric memory access for parallel programming
+- **Jinja2-Based Benchmark Templates**: Dynamic code generation for customizable benchmarks with configurable iterations, message sizes, and compilers
 - **Automated Installation**: Installs and configures Homebrew, Slurm, and all parallel libraries
+- **Parallel Execution**: Uses pdsh for fast cluster-wide operations with sequential fallback
 - **Cluster-Ready**: Configures master and worker nodes for distributed computing
 - **Run from Any Node**: Setup entire cluster from master OR any worker node - automatic detection
 - **Multi-OS Support**: Works on Ubuntu Linux, WSL with Ubuntu, Red Hat, CentOS, and Fedora
 - **Smart Package Manager Detection**: Automatically uses apt-get (Ubuntu/Debian) or dnf (Red Hat/CentOS/Fedora)
 - **Homebrew-Based**: All parallel libraries installed via Homebrew for consistency
+- **Comprehensive Testing**: 11 test modules with 62+ test methods for validation
 
 ## Requirements
 
@@ -195,6 +200,56 @@ python cluster_setup.py --config cluster_config.yaml --password
 ip addr show | grep "inet "
 # The script will detect which node you're on automatically
 ```
+
+## Modular Architecture
+
+The project uses a clean modular design with dedicated manager modules for each component:
+
+### Manager Modules (`cluster_modules/`)
+
+| Module | Purpose | Key Features |
+|--------|---------|--------------|
+| **ssh_manager.py** | SSH Configuration | Key distribution, passwordless SSH mesh |
+| **sudo_manager.py** | Sudo Access | Passwordless sudo for cluster operations |
+| **network_manager.py** | Network & Firewall | UFW/firewalld, hosts file management |
+| **mpi_manager.py** | OpenMPI | Hostfiles, MCA parameters, multi-node testing |
+| **openmp_manager.py** | OpenMP | libomp installation, thread testing |
+| **openshmem_manager.py** | OpenSHMEM | Sandia OpenSHMEM 1.5.2 installation |
+| **berkeley_upc_manager.py** | Berkeley UPC | Unified Parallel C with GASNet conduits |
+| **benchmark_manager.py** | Benchmarks | PGAS benchmark suite generation |
+| **slurm_manager.py** | Slurm | Workload manager configuration |
+
+### Key Benefits
+
+- **Parallel Execution**: All managers support `pdsh` for fast cluster-wide operations
+- **Sequential Fallback**: Automatically falls back to sequential execution if pdsh unavailable
+- **Testability**: Each module has comprehensive unit tests
+- **Reusability**: Managers can be used independently or orchestrated
+- **Maintainability**: Clean separation of concerns
+
+### Usage Example
+
+```python
+from cluster_modules import (
+    SSHManager, BerkeleyUPCManager, OpenSHMEMManager
+)
+
+# Configure SSH
+ssh_mgr = SSHManager(username, password, master_ip, worker_ips)
+ssh_mgr.setup_ssh()
+
+# Install Berkeley UPC
+bupc_mgr = BerkeleyUPCManager(username, password, master_ip, worker_ips)
+bupc_mgr.install_full_workflow(num_jobs=8)
+
+# Install OpenSHMEM
+openshmem_mgr = OpenSHMEMManager(username, password, master_ip, worker_ips)
+openshmem_mgr.download_openshmem()
+openshmem_mgr.build_openshmem()
+openshmem_mgr.distribute_openshmem_pdsh()
+```
+
+**See**: [`cluster_modules/README.md`](cluster_modules/README.md) for complete documentation.
 
 ### Configuration File
 
@@ -594,6 +649,77 @@ mpirun --map-by node -np 152 --hostfile ~/.openmpi/hostfile_max ./my_program
 - **Need domain decomposition?** Use `hostfile_optimal` (1 domain per node)
 - **Pure MPI application?** Use `hostfile_max`
 - **Custom requirements?** Use `hostfile` and adjust slots
+
+## Project Structure
+
+```
+ClusterSetupAndConfigs/
+├── cluster_setup.py              # Main cluster setup script (2840+ lines)
+├── cluster_config.yaml           # Cluster configuration file
+├── pyproject.toml                # Python project dependencies (uv)
+├── requirements.txt              # Pip requirements (legacy)
+│
+├── cluster_tools/                # 🆕 Cluster management tools (NEW)
+│   ├── __init__.py              # Package initialization
+│   ├── README.md                # Cluster tools documentation
+│   ├── configure_pgas.py        # PGAS cluster configuration tool
+│   │
+│   └── pgas/                    # 🆕 PGAS module (NEW - migrated Nov 4, 2025)
+│       ├── __init__.py          # PGAS package initialization
+│       ├── README.md            # Complete PGAS documentation
+│       ├── PGAS_INSTALLATION_SUMMARY.md  # Installation record
+│       ├── PGAS_STATUS.md       # Current PGAS status
+│       ├── PGAS_TESTING_GUIDE.md        # Testing guide
+│       └── execute_pgas_config.py       # Legacy config script
+│
+├── CLAUDE.md                     # Instructions for Claude AI agents
+├── copilot-instructions.md       # GitHub Copilot instructions
+├── DEPLOYMENT_GUIDE.md           # Comprehensive deployment guide
+├── USAGE_EXAMPLES.md             # Usage examples and patterns
+├── DEFAULT_BRANCH_INSTRUCTIONS.md # Git workflow instructions
+│
+├── WSL_FIREWALL_SETUP.md         # WSL firewall configuration
+├── configure_wsl_firewall.ps1    # WSL firewall PowerShell script
+├── setup_wsl_port_forwarding.ps1 # Port forwarding script
+│
+├── example_config.txt            # Example configuration
+├── mpi_test.py                   # MPI test script
+├── test_cluster_setup.py         # Cluster setup tests
+│
+└── README.md                     # This file
+```
+
+### 🆕 Recent Reorganization (November 4, 2025)
+
+**PGAS-related files have been moved to `cluster_tools/pgas/`** for better organization:
+
+**Before:**
+- PGAS files scattered in repository root
+- `configure_cluster_pgas.py` in root
+- Documentation mixed with main README
+
+**After:**
+```
+cluster_tools/
+├── configure_pgas.py         # Main PGAS configuration tool
+└── pgas/                     # All PGAS-related files
+    ├── README.md            # Complete PGAS documentation
+    ├── PGAS_*.md            # Installation, status, testing guides
+    └── execute_pgas_config.py  # Legacy scripts
+```
+
+**To use PGAS tools:**
+```bash
+# Configure PGAS cluster-wide
+python3 cluster_tools/configure_pgas.py
+
+# Or with uv
+uv run python cluster_tools/configure_pgas.py
+```
+
+**Documentation:**
+- **PGAS Setup**: See [cluster_tools/pgas/README.md](cluster_tools/pgas/README.md)
+- **Cluster Tools**: See [cluster_tools/README.md](cluster_tools/README.md)
 
 ## Troubleshooting
 
