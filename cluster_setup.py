@@ -1215,13 +1215,13 @@ rm -f $SUDO_ASKPASS
         - MPI conduit: Multi-node via MPI (requires OpenMPI)
         - UDP conduit: Multi-node via UDP sockets
         
-        Installation is performed from source in ~/cluster_sources directory
+        Installation is performed from source in ~/cluster_build_sources directory
         """
         print("\n=== Installing UPC++, GASNet-EX, and OpenSHMEM from Source ===")
         
         # Installation directory
         install_prefix = "/home/linuxbrew/.linuxbrew"
-        pgas_build_dir = Path.home() / "cluster_sources"
+        pgas_build_dir = Path.home() / "cluster_build_sources"
         pgas_build_dir.mkdir(exist_ok=True)
         print(f"Using build directory: {pgas_build_dir}")
         
@@ -1417,7 +1417,7 @@ rm -f $SUDO_ASKPASS
     def distribute_pgas_to_cluster(self):
         """Distribute PGAS libraries (UPC++, GASNet, OpenSHMEM) to all cluster nodes
         
-        Creates ~/cluster_sources directory on each node and copies the built
+        Creates ~/cluster_build_sources directory on each node and copies the built
         binaries/libraries for parallel installation across the cluster.
         """
         if not self.password:
@@ -1457,11 +1457,11 @@ rm -f $SUDO_ASKPASS
         for node_ip in other_nodes:
             print(f"\n→ Distributing to {node_ip}...")
             
-            # Create cluster_sources directory on remote node
-            create_dir_cmd = f"sshpass -p '{self.password}' ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} 'mkdir -p ~/cluster_sources'"
+            # Create cluster_build_sources directory on remote node
+            create_dir_cmd = f"sshpass -p '{self.password}' ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} 'mkdir -p ~/cluster_build_sources'"
             result = self.run_command(create_dir_cmd, check=False)
             if result.returncode != 0:
-                print(f"  ⚠ Failed to create cluster_sources directory on {node_ip}")
+                print(f"  ⚠ Failed to create cluster_build_sources directory on {node_ip}")
                 continue
             
             # Copy each PGAS component if it exists
@@ -1523,7 +1523,7 @@ EOF
         print("PGAS Distribution Complete")
         print("="*70)
         print("✓ All cluster nodes now have UPC++, GASNet, and OpenSHMEM")
-        print(f"✓ Build artifacts stored in ~/cluster_sources on each node")
+        print(f"✓ Build artifacts stored in ~/cluster_build_sources on each node")
         print(f"✓ Binaries installed in {install_prefix}")
         print("\nTest installation on any node:")
         print("  source ~/.bashrc")

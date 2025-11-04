@@ -427,7 +427,7 @@ The cluster setup script performs the following operations:
    - Provides compiler support for `-fopenmp` flag
    - Enables thread-level parallelism within a single node
 10. **UPC++ and PGAS Libraries Installation**: Installs PGAS programming models from source
-   - **Build Directory**: `~/cluster_sources` on each node for source code and builds
+   - **Build Directory**: `~/cluster_build_sources` on each node for source code and builds
    - **GASNet-EX**: Communication layer with MPI, SMP, and UDP conduits
    - **UPC++**: Berkeley's Unified Parallel C++ library for PGAS programming
    - **OpenSHMEM**: Sandia's Symmetric Hierarchical Memory library
@@ -1384,7 +1384,7 @@ The cluster supports **Partitioned Global Address Space (PGAS)** programming mod
 
 ### Installation Paths
 
-- **Build Directory**: `~/cluster_sources` (source code and build artifacts on each node)
+- **Build Directory**: `~/cluster_build_sources` (source code and build artifacts on each node)
 - **GASNet-EX**: `/home/linuxbrew/.linuxbrew/gasnet`
 - **UPC++ Installation**: `/home/linuxbrew/.linuxbrew/upcxx`
 - **OpenSHMEM**: `/home/linuxbrew/.linuxbrew/openshmem`
@@ -1395,7 +1395,7 @@ The cluster supports **Partitioned Global Address Space (PGAS)** programming mod
 ### Cluster-Wide Installation
 
 When running with the `--password` flag, the setup script automatically:
-1. Builds PGAS libraries from source in `~/cluster_sources` on the first node
+1. Builds PGAS libraries from source in `~/cluster_build_sources` on the first node
 2. Distributes compiled binaries to all other cluster nodes via rsync
 3. Updates environment variables on all nodes
 4. Creates symbolic links for easy access cluster-wide

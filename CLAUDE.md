@@ -641,7 +641,7 @@ mpirun --map-by node -np 12 --hostfile ~/.openmpi/hostfile ./my_program
 
 The cluster setup now includes **Berkeley UPC++** and PGAS (Partitioned Global Address Space) programming support built from source:
 
-**Build Directory**: `~/cluster_sources` on each node (source code and compilation artifacts)
+**Build Directory**: `~/cluster_build_sources` on each node (source code and compilation artifacts)
 
 **Installed Components**:
 - **GASNet-EX 2024.5.0**: `/home/linuxbrew/.linuxbrew/gasnet` - Communication layer
