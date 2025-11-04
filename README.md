@@ -4,55 +4,76 @@ Automated cluster setup and configuration scripts for Slurm and OpenMPI on Ubunt
 
 ## Recent Updates (November 4, 2025)
 
-**Version 3.0 - Modular Architecture & Latest Compilers:**
+**Version 3.0 - Complete Modularization & PGAS Integration:**
+
+✅ **Complete Modularization (84% Code Reduction):**
+- Reduced `cluster_setup.py` from 2,951 lines to 474 lines (84% reduction!)
+- Legacy monolithic code archived in `legacy/` folder
+- 12 specialized managers for maintainable, extensible architecture
+- All PGAS functionality consolidated into `PGASManager`
+
+✅ **New PGASManager:**
+- Unified installation of GASNet-EX 2024.5.0, UPC++ 2024.3.0, OpenSHMEM 1.5.2
+- Automatic environment configuration (PATH, LD_LIBRARY_PATH)
+- Support for MPI, SMP, and UDP conduits
+- PGAS documentation moved to `cluster_modules/pgas_docs/`
+
+✅ **Passwordless Sudo (Single Password Entry):**
+- Passwordless sudo configured as Step 0 (before any sudo operations)
+- Only ONE password prompt needed for entire cluster setup
+- Full sudo access for all cluster operations
+- Tested and verified on all nodes
 
 ✅ **Compiler Updates:**
-- Upgraded to GCC 15.2.0 and Binutils 2.45 across all cluster nodes
+- GCC 15.2.0 and Binutils 2.45 across all cluster nodes
 - Automated symlink creation: `gcc -> gcc-15`, `g++ -> g++-15`, `gfortran -> gfortran-15`
 - Post-installation symlink verification and fixing
 - All nodes verified with consistent compiler versions
 
 ✅ **Setup Flow Optimization:**
-- Reordered setup steps: SSH → Sudo → Homebrew → Compilers → Libraries → Configuration
-- SSH keys distributed FIRST (enables remote operations)
-- GCC/binutils installed BEFORE parallel libraries (proper dependencies)
-- Post-installation fixes ensure correct symlinks on all nodes
+- Step 0: Passwordless Sudo (FIRST - single password prompt)
+- Step 1: SSH Keys (enables remote operations)
+- Step 2: Homebrew, GCC, Binutils
+- Step 3-8: Libraries, configuration, verification
+- Total runtime: ~2 minutes on pre-configured nodes
 
-✅ **Modular Managers (11 modules):**
-- `HomebrewManager`: GCC, binutils, Python installation with automated symlinks
+✅ **12 Modular Managers:**
+- `PGASManager`: NEW - Unified PGAS library installation
+- `HomebrewManager`: GCC, binutils, Python with automated symlinks
 - `SSHManager`, `SudoManager`, `NetworkManager`: Core infrastructure
 - `MPIManager`, `OpenMPManager`, `OpenSHMEMManager`, `BerkeleyUPCManager`: Parallel libraries
 - `SlurmManager`, `PDSHManager`, `BenchmarkManager`: Workload management & testing
-- 90% code reduction through modularization
+
+✅ **ClusterCore Pattern:**
+- `SSHManager` and `PGASManager` use `ClusterCore` base class
+- Consistent API across all managers
+- Easy to extend with new managers
 
 ✅ **Jinja2 Templates:**
 - Dynamic benchmark generation with configurable parameters
 - 7 templates: UPC++ latency/bandwidth, MPI, OpenSHMEM, Berkeley UPC, Makefile, run scripts
 - Flexible iterations, message sizes, warmup configurations
 
-✅ **Documentation Reorganized:**
-- `cluster_modules/REFACTORING_DOCUMENTATION.md`: Complete module documentation
-- `cluster_modules/COMPILER_UPDATE_SUMMARY.md`: Compiler configuration details
-- `tests/TESTING_SUMMARY.md`: Comprehensive testing results
-- All documentation consolidated in appropriate folders
-
 ✅ **Testing:**
 - 118 total tests (102 passing, 16 expected failures for uninstalled components)
 - 41 new tests for Jinja2 templates and pdsh functionality
-- All tests passing on production cluster
+- Successfully tested on production cluster (4 nodes)
+- Zero password prompts with passwordless sudo configured
 
 **See [`cluster_modules/REFACTORING_DOCUMENTATION.md`](cluster_modules/REFACTORING_DOCUMENTATION.md) for complete details.**
 
 ## Features
 
-- **Modular Architecture** (NEW v3.0): 90% code reduction through dedicated manager modules
-  - HomebrewManager: GCC 15.2.0, binutils 2.45, automated symlinks
-  - SSHManager: Key distribution, passwordless authentication
-  - SudoManager: Passwordless sudo configuration
-  - MPIManager: OpenMPI 5.0.8 configuration
-  - NetworkManager: Firewall and port configuration
-  - PDSHManager: Parallel distributed shell operations
-  - And 5 more specialized managers (OpenMP, OpenSHMEM, Berkeley UPC, Slurm, Benchmarks)
+- **Fully Modular Architecture** (NEW v3.0): 84% code reduction (2951→474 lines)
+  - **PGASManager**: NEW - Unified GASNet-EX, UPC++, OpenSHMEM installation
+  - **HomebrewManager**: GCC 15.2.0, binutils 2.45, automated symlinks
+  - **SSHManager**: Key distribution, passwordless authentication (uses ClusterCore)
+  - **SudoManager**: Passwordless sudo (single password prompt for entire setup)
+  - **MPIManager**: OpenMPI installation and configuration
+  - **NetworkManager**: Firewall and port configuration
+  - **PDSHManager**: Parallel distributed shell operations
+  - Plus 5 more: OpenMPManager, OpenSHMEMManager, BerkeleyUPCManager, SlurmManager, BenchmarkManager
+  - Legacy code archived in `legacy/` folder
 - **Pure Python Implementation**: Written entirely in Python 3.14 for easy customization and maintenance
 - **Comprehensive Parallel Programming Support**:
   - **OpenMPI 5.0.8**: Message Passing Interface for distributed computing
