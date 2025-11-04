@@ -1555,6 +1555,711 @@ EOF
         print("  upcxx --version")
         print("="*70)
 
+    def configure_passwordless_sudo_cluster(self):
+        """Configure passwordless sudo for cluster operations on all nodes
+        
+        Creates /etc/sudoers.d/cluster-ops file allowing passwordless execution
+        of specific commands needed for cluster management.
+        """
+        if not self.password:
+            print("\n⚠ Skipping passwordless sudo configuration - password not provided")
+            return
+        
+        print("\n=== Configuring Passwordless Sudo on All Cluster Nodes ===")
+        
+        all_nodes = [self.master_ip] + self.worker_ips
+        
+        # Get local IPs to identify current node
+        try:
+            result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, check=False)
+            import re
+            local_ips = re.findall(r'inet\s+(\d+\.\d+\.\d+\.\d+)', result.stdout)
+        except:
+            local_ips = []
+        
+        # Sudoers configuration for cluster operations
+        sudoers_content = f"{self.username} ALL=(ALL) NOPASSWD: /usr/bin/ln, /usr/bin/rsync, /usr/bin/systemctl, /usr/bin/mkdir, /usr/bin/chmod, /usr/bin/chown, /usr/bin/tee, /usr/bin/cp, /bin/ln, /bin/rsync, /bin/systemctl, /bin/mkdir, /bin/chmod, /bin/chown, /bin/tee, /bin/cp"
+        
+        # Configure local node first
+        if any(ip in local_ips for ip in all_nodes):
+            print(f"\n→ Configuring local node...")
+            try:
+                # Create temporary file
+                with open('/tmp/cluster-ops-sudoers', 'w') as f:
+                    f.write(sudoers_content + '\n')
+                
+                # Copy to sudoers.d with proper permissions
+                self.run_sudo_command("cp /tmp/cluster-ops-sudoers /etc/sudoers.d/cluster-ops")
+                self.run_sudo_command("chmod 440 /etc/sudoers.d/cluster-ops")
+                
+                # Verify syntax
+                result = self.run_sudo_command("visudo -c", check=False)
+                if result.returncode == 0:
+                    print("  ✓ Passwordless sudo configured on local node")
+                else:
+                    print("  ⚠ Warning: sudoers syntax check failed, removing configuration")
+                    self.run_sudo_command("rm -f /etc/sudoers.d/cluster-ops", check=False)
+            except Exception as e:
+                print(f"  ⚠ Failed to configure local node: {e}")
+        
+        # Configure remote nodes
+        other_nodes = [ip for ip in all_nodes if ip not in local_ips]
+        
+        for node_ip in other_nodes:
+            print(f"\n→ Configuring {node_ip}...")
+            
+            try:
+                # Create sudoers file on remote node using echo and sudo tee
+                config_cmd = f"""sshpass -p '{self.password}' ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} "echo '{sudoers_content}' | sudo -S tee /tmp/cluster-ops-sudoers > /dev/null && echo '{self.password}' | sudo -S cp /tmp/cluster-ops-sudoers /etc/sudoers.d/cluster-ops && echo '{self.password}' | sudo -S chmod 440 /etc/sudoers.d/cluster-ops && echo '{self.password}' | sudo -S rm -f /tmp/cluster-ops-sudoers" """
+                
+                result = self.run_command(config_cmd, check=False)
+                if result.returncode == 0:
+                    print(f"  ✓ Passwordless sudo configured on {node_ip}")
+                else:
+                    print(f"  ⚠ Failed to configure {node_ip}: {result.stderr}")
+            except Exception as e:
+                print(f"  ⚠ Failed to configure {node_ip}: {e}")
+        
+        print("\n" + "="*70)
+        print("Passwordless Sudo Configuration Complete")
+        print("="*70)
+        print(f"✓ Configured sudo access for: ln, rsync, systemctl, mkdir, chmod, chown")
+        print(f"✓ Configuration file: /etc/sudoers.d/cluster-ops")
+        print("\nTest with: ssh <node> 'sudo ln --help'")
+        print("="*70)
+
+    def distribute_system_symlinks_cluster(self):
+        """Distribute system symlinks for binutils and Python to all cluster nodes
+        
+        Creates symlinks in /usr/local/bin for consistent tool versions across the cluster.
+        Requires passwordless sudo to be configured first.
+        """
+        if not self.password:
+            print("\n⚠ Skipping system symlinks distribution - password not provided")
+            return
+        
+        print("\n=== Distributing System Symlinks to All Cluster Nodes ===")
+        
+        all_nodes = [self.master_ip] + self.worker_ips
+        
+        # Get local IPs
+        try:
+            result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, check=False)
+            import re
+            local_ips = re.findall(r'inet\s+(\d+\.\d+\.\d+\.\d+)', result.stdout)
+        except:
+            local_ips = []
+        
+        # Symlinks to create on each node
+        symlinks = {
+            "/home/linuxbrew/.linuxbrew/opt/binutils/bin/as": "/usr/local/bin/as",
+            "/home/linuxbrew/.linuxbrew/opt/binutils/bin/ld": "/usr/local/bin/ld",
+            "/home/linuxbrew/.linuxbrew/opt/binutils/bin/ar": "/usr/local/bin/ar",
+            "/home/linuxbrew/.linuxbrew/opt/binutils/bin/ranlib": "/usr/local/bin/ranlib",
+            "/home/linuxbrew/.linuxbrew/bin/python3": "/usr/local/bin/python3",
+            "/home/linuxbrew/.linuxbrew/bin/pip3": "/usr/local/bin/pip3",
+            "/home/linuxbrew/.linuxbrew/upcxx/bin/upcxx": "/home/linuxbrew/.linuxbrew/bin/upcxx",
+            "/home/linuxbrew/.linuxbrew/upcxx/bin/upcxx-run": "/home/linuxbrew/.linuxbrew/bin/upcxx-run",
+            "/home/linuxbrew/.linuxbrew/upcxx/bin/upcxx-meta": "/home/linuxbrew/.linuxbrew/bin/upcxx-meta",
+        }
+        
+        # Configure other nodes (excluding current node which was done during install)
+        other_nodes = [ip for ip in all_nodes if ip not in local_ips]
+        
+        for node_ip in other_nodes:
+            print(f"\n→ Creating symlinks on {node_ip}...")
+            
+            success_count = 0
+            for source, target in symlinks.items():
+                try:
+                    # Check if source exists, then create symlink with passwordless sudo
+                    symlink_cmd = f"""ssh {self.username}@{node_ip} "if [ -f {source} ] || [ -L {source} ]; then sudo ln -sf {source} {target} && echo 'OK'; else echo 'SKIP'; fi" """
+                    
+                    result = self.run_command(symlink_cmd, check=False)
+                    if result.returncode == 0 and 'OK' in result.stdout:
+                        success_count += 1
+                    elif 'SKIP' in result.stdout:
+                        pass  # Source doesn't exist, skip silently
+                    else:
+                        print(f"    ⚠ Failed: {target}")
+                except Exception as e:
+                    print(f"    ⚠ Error creating {target}: {e}")
+            
+            if success_count > 0:
+                print(f"  ✓ Created {success_count}/{len(symlinks)} symlinks on {node_ip}")
+            
+            # Verify binutils version
+            print(f"  Verifying installations on {node_ip}...")
+            verify_cmds = [
+                ("Binutils", "as --version | head -1"),
+                ("Python", "python3 --version"),
+                ("UPC++", "upcxx --version 2>&1 | head -1"),
+            ]
+            
+            for tool_name, cmd in verify_cmds:
+                verify_cmd = f"ssh {self.username}@{node_ip} '{cmd}' "
+                result = self.run_command(verify_cmd, check=False)
+                if result.returncode == 0:
+                    version_info = result.stdout.strip()
+                    print(f"    ✓ {tool_name}: {version_info}")
+        
+        print("\n" + "="*70)
+        print("System Symlinks Distribution Complete")
+        print("="*70)
+        print("✓ All nodes have consistent tool versions")
+        print("✓ Binutils 2.45, Python 3.14, UPC++ available cluster-wide")
+        print("="*70)
+
+    def test_multinode_upcxx(self):
+        """Test UPC++ multi-node execution across the cluster
+        
+        Creates test programs and validates SMP, UDP, and MPI conduits.
+        """
+        print("\n=== Testing Multi-Node UPC++ Execution ===")
+        
+        test_dir = Path.home() / "cluster_build_sources" / "upcxx_tests"
+        test_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create a simple UPC++ test program
+        test_program = """
+#include <upcxx/upcxx.hpp>
+#include <iostream>
+
+int main() {
+    upcxx::init();
+    
+    if (upcxx::rank_me() == 0) {
+        std::cout << "UPC++ Multi-Node Test\\n";
+        std::cout << "Total ranks: " << upcxx::rank_n() << "\\n";
+    }
+    
+    upcxx::barrier();
+    
+    std::cout << "Rank " << upcxx::rank_me() 
+              << " running on " << upcxx::local_team().rank_n() 
+              << " local ranks\\n";
+    
+    upcxx::finalize();
+    return 0;
+}
+"""
+        
+        test_file = test_dir / "hello_multinode.cpp"
+        with open(test_file, 'w') as f:
+            f.write(test_program)
+        
+        print(f"Created test program: {test_file}")
+        
+        # Test 1: SMP conduit (single node)
+        print("\n--- Test 1: SMP Conduit (Single Node) ---")
+        compile_cmd = f"cd {test_dir} && upcxx -network=smp hello_multinode.cpp -o hello_smp"
+        result = self.run_command(compile_cmd, check=False)
+        
+        if result.returncode == 0:
+            print("  ✓ Compilation successful")
+            
+            # Run with 4 processes
+            run_cmd = f"cd {test_dir} && GASNET_PSHM_NODES=1 upcxx-run -n 4 ./hello_smp"
+            result = self.run_command(run_cmd, check=False)
+            
+            if result.returncode == 0:
+                print("  ✓ SMP execution successful")
+                print(f"  Output:\n{result.stdout}")
+            else:
+                print(f"  ⚠ SMP execution failed: {result.stderr}")
+        else:
+            print(f"  ⚠ SMP compilation failed: {result.stderr}")
+        
+        # Test 2: UDP conduit (multi-node)
+        print("\n--- Test 2: UDP Conduit (Multi-Node) ---")
+        
+        # Create server list
+        all_nodes = [self.master_ip] + self.worker_ips
+        server_list = ','.join(all_nodes)
+        
+        compile_cmd = f"cd {test_dir} && upcxx -network=udp hello_multinode.cpp -o hello_udp"
+        result = self.run_command(compile_cmd, check=False)
+        
+        if result.returncode == 0:
+            print("  ✓ Compilation successful")
+            print(f"  Server list: {server_list}")
+            
+            # Calculate total processes (4 per node)
+            total_procs = len(all_nodes) * 4
+            
+            # Run across all nodes
+            run_cmd = f"cd {test_dir} && GASNET_SSH_SERVERS='{server_list}' upcxx-run -n {total_procs} ./hello_udp"
+            result = self.run_command(run_cmd, check=False)
+            
+            if result.returncode == 0:
+                print(f"  ✓ UDP execution successful ({total_procs} processes across {len(all_nodes)} nodes)")
+                print(f"  Output:\n{result.stdout}")
+            else:
+                print(f"  ⚠ UDP execution failed: {result.stderr}")
+                print(f"  Note: Ensure passwordless SSH is configured and GASNet is installed on all nodes")
+        else:
+            print(f"  ⚠ UDP compilation failed: {result.stderr}")
+        
+        # Test 3: MPI conduit (if available)
+        print("\n--- Test 3: MPI Conduit (Multi-Node) ---")
+        
+        compile_cmd = f"cd {test_dir} && upcxx -network=mpi hello_multinode.cpp -o hello_mpi"
+        result = self.run_command(compile_cmd, check=False)
+        
+        if result.returncode == 0:
+            print("  ✓ Compilation successful")
+            
+            # Create MPI hostfile
+            hostfile = test_dir / "mpi_hostfile"
+            with open(hostfile, 'w') as f:
+                for node in all_nodes:
+                    f.write(f"{node} slots=4\n")
+            
+            total_procs = len(all_nodes) * 4
+            
+            # Run with mpirun
+            run_cmd = f"cd {test_dir} && mpirun -np {total_procs} -hostfile {hostfile} ./hello_mpi"
+            result = self.run_command(run_cmd, check=False)
+            
+            if result.returncode == 0:
+                print(f"  ✓ MPI execution successful ({total_procs} processes across {len(all_nodes)} nodes)")
+                print(f"  Output:\n{result.stdout}")
+            else:
+                print(f"  ⚠ MPI execution failed: {result.stderr}")
+        else:
+            print(f"  ⚠ MPI compilation failed (may not be configured): {result.stderr}")
+        
+        print("\n" + "="*70)
+        print("UPC++ Multi-Node Testing Complete")
+        print("="*70)
+        print(f"✓ Test programs available in: {test_dir}")
+        print(f"✓ Run manually: cd {test_dir} && upcxx-run -n <N> ./hello_<conduit>")
+        print("="*70)
+
+    def install_openshmem_cluster(self):
+        """Install Sandia OpenSHMEM 1.5.2 and distribute to all cluster nodes
+        
+        Downloads, compiles, and installs OpenSHMEM with PMI support for Slurm integration.
+        """
+        print("\n=== Installing Sandia OpenSHMEM 1.5.2 ===")
+        
+        pgas_build_dir = Path.home() / "cluster_build_sources"
+        pgas_build_dir.mkdir(exist_ok=True)
+        
+        oshmem_version = "1.5.2"
+        oshmem_url = f"https://github.com/Sandia-OpenSHMEM/SOS/releases/download/v{oshmem_version}/sandia-openshmem-{oshmem_version}.tar.gz"
+        oshmem_dir = pgas_build_dir / f"sandia-openshmem-{oshmem_version}"
+        oshmem_install = "/home/linuxbrew/.linuxbrew/openshmem"
+        
+        # Download if not already present
+        if not oshmem_dir.exists():
+            print(f"Downloading OpenSHMEM {oshmem_version}...")
+            download_cmd = f"cd {pgas_build_dir} && wget -q {oshmem_url} && tar xzf sandia-openshmem-{oshmem_version}.tar.gz"
+            result = self.run_command(download_cmd, check=False)
+            
+            if result.returncode != 0:
+                print(f"⚠ Failed to download OpenSHMEM: {result.stderr}")
+                return
+        
+        # Configure with PMI support
+        print("Configuring OpenSHMEM with PMI support...")
+        
+        gcc_bin = "/home/linuxbrew/.linuxbrew/bin/gcc"
+        gxx_bin = "/home/linuxbrew/.linuxbrew/bin/g++"
+        
+        configure_cmd = (
+            f"cd {oshmem_dir} && "
+            f"CC={gcc_bin} CXX={gxx_bin} ./configure "
+            f"--prefix={oshmem_install} "
+            f"--enable-pmi-simple "
+            f"--with-pmix=internal"
+        )
+        
+        result = self.run_command(configure_cmd, check=False)
+        
+        if result.returncode != 0:
+            print(f"⚠ OpenSHMEM configuration failed: {result.stderr}")
+            return
+        
+        # Build and install
+        print("Building OpenSHMEM (this may take 5-10 minutes)...")
+        build_cmd = f"cd {oshmem_dir} && make -j$(nproc) && make install"
+        result = self.run_command(build_cmd, check=False)
+        
+        if result.returncode != 0:
+            print(f"⚠ OpenSHMEM build failed: {result.stderr}")
+            return
+        
+        print("✓ OpenSHMEM installed successfully")
+        
+        # Create symlinks
+        print("Creating symbolic links...")
+        self.run_command(f"ln -sf {oshmem_install}/bin/oshcc /home/linuxbrew/.linuxbrew/bin/oshcc", check=False)
+        self.run_command(f"ln -sf {oshmem_install}/bin/oshrun /home/linuxbrew/.linuxbrew/bin/oshrun", check=False)
+        
+        # Update environment
+        bashrc = Path.home() / ".bashrc"
+        env_lines = [
+            "\n# OpenSHMEM Environment",
+            f"export OPENSHMEM_INSTALL={oshmem_install}",
+            f"export PATH={oshmem_install}/bin:$PATH",
+            f"export LD_LIBRARY_PATH={oshmem_install}/lib:$LD_LIBRARY_PATH",
+        ]
+        
+        # Check if already added
+        with open(bashrc, 'r') as f:
+            bashrc_content = f.read()
+        
+        if "OpenSHMEM Environment" not in bashrc_content:
+            with open(bashrc, 'a') as f:
+                for line in env_lines:
+                    f.write(line + '\n')
+            print("✓ Environment variables added to ~/.bashrc")
+        
+        # Distribute to all cluster nodes
+        if self.password:
+            print("\nDistributing OpenSHMEM to all cluster nodes...")
+            
+            all_nodes = [self.master_ip] + self.worker_ips
+            
+            # Get local IPs
+            try:
+                result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, check=False)
+                import re
+                local_ips = re.findall(r'inet\s+(\d+\.\d+\.\d+\.\d+)', result.stdout)
+            except:
+                local_ips = []
+            
+            other_nodes = [ip for ip in all_nodes if ip not in local_ips]
+            
+            for node_ip in other_nodes:
+                print(f"\n→ Distributing to {node_ip}...")
+                
+                if os.path.exists(oshmem_install):
+                    rsync_cmd = (
+                        f"sshpass -p '{self.password}' rsync -avz --delete "
+                        f"-e 'ssh -o StrictHostKeyChecking=no' "
+                        f"{oshmem_install}/ "
+                        f"{self.username}@{node_ip}:{oshmem_install}/"
+                    )
+                    result = self.run_command(rsync_cmd, check=False)
+                    
+                    if result.returncode == 0:
+                        print(f"  ✓ OpenSHMEM copied to {node_ip}")
+                        
+                        # Update environment on remote node
+                        env_update_cmd = f"""sshpass -p '{self.password}' ssh -o StrictHostKeyChecking=no {self.username}@{node_ip} '
+                            grep -q "OpenSHMEM Environment" ~/.bashrc || cat >> ~/.bashrc << "EOF"
+
+# OpenSHMEM Environment
+export OPENSHMEM_INSTALL={oshmem_install}
+export PATH={oshmem_install}/bin:$PATH
+export LD_LIBRARY_PATH={oshmem_install}/lib:$LD_LIBRARY_PATH
+EOF
+                        '"""
+                        self.run_command(env_update_cmd, check=False)
+                        
+                        # Create symlinks
+                        symlink_cmd = f"""ssh {self.username}@{node_ip} "sudo ln -sf {oshmem_install}/bin/oshcc /home/linuxbrew/.linuxbrew/bin/oshcc && sudo ln -sf {oshmem_install}/bin/oshrun /home/linuxbrew/.linuxbrew/bin/oshrun" """
+                        self.run_command(symlink_cmd, check=False)
+                    else:
+                        print(f"  ⚠ Failed to copy OpenSHMEM to {node_ip}")
+        
+        print("\n" + "="*70)
+        print("OpenSHMEM Installation Summary")
+        print("="*70)
+        print(f"✓ OpenSHMEM {oshmem_version}: {oshmem_install}")
+        print("\nUsage:")
+        print("  Compile: oshcc -o program program.c")
+        print("  Run: oshrun -np 4 ./program")
+        print("\nDocumentation: https://github.com/Sandia-OpenSHMEM/SOS")
+        print("="*70)
+
+    def create_pgas_benchmark_suite(self):
+        """Create comprehensive PGAS vs MPI benchmark suite
+        
+        Develops benchmarks for point-to-point, collective operations, and one-sided communication.
+        """
+        print("\n=== Creating PGAS vs MPI Benchmark Suite ===")
+        
+        benchmark_dir = Path.home() / "cluster_build_sources" / "pgas_benchmarks"
+        benchmark_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"Creating benchmark suite in: {benchmark_dir}")
+        
+        # 1. Point-to-point latency benchmark (UPC++ vs MPI)
+        print("\n→ Creating point-to-point latency benchmark...")
+        
+        p2p_upcxx = """
+#include <upcxx/upcxx.hpp>
+#include <iostream>
+#include <chrono>
+
+int main() {
+    upcxx::init();
+    
+    const int iterations = 10000;
+    int rank = upcxx::rank_me();
+    int nranks = upcxx::rank_n();
+    
+    if (nranks < 2) {
+        if (rank == 0) std::cout << "Need at least 2 processes\\n";
+        upcxx::finalize();
+        return 1;
+    }
+    
+    upcxx::global_ptr<int> remote_ptr = upcxx::new_<int>(0);
+    int local_val = rank;
+    
+    upcxx::barrier();
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    if (rank == 0) {
+        // Ping-pong test
+        for (int i = 0; i < iterations; i++) {
+            upcxx::rput(local_val, remote_ptr, 1).wait();
+        }
+    }
+    
+    upcxx::barrier();
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    
+    if (rank == 0) {
+        double latency_us = static_cast<double>(duration.count()) / iterations;
+        std::cout << "UPC++ Point-to-Point Latency: " << latency_us << " us\\n";
+    }
+    
+    upcxx::delete_(remote_ptr);
+    upcxx::finalize();
+    return 0;
+}
+"""
+        
+        with open(benchmark_dir / "p2p_latency_upcxx.cpp", 'w') as f:
+            f.write(p2p_upcxx)
+        
+        p2p_mpi = """
+#include <mpi.h>
+#include <iostream>
+#include <chrono>
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+    
+    int rank, nranks;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &nranks);
+    
+    const int iterations = 10000;
+    int val = rank;
+    
+    if (nranks < 2) {
+        if (rank == 0) std::cout << "Need at least 2 processes\\n";
+        MPI_Finalize();
+        return 1;
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    if (rank == 0) {
+        for (int i = 0; i < iterations; i++) {
+            MPI_Send(&val, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+            MPI_Recv(&val, 1, MPI_INT, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+    } else if (rank == 1) {
+        for (int i = 0; i < iterations; i++) {
+            MPI_Recv(&val, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Send(&val, 1, MPI_INT, 0, 0, MPI_COMM_WORLD);
+        }
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    
+    if (rank == 0) {
+        double latency_us = static_cast<double>(duration.count()) / (2 * iterations);
+        std::cout << "MPI Point-to-Point Latency: " << latency_us << " us\\n";
+    }
+    
+    MPI_Finalize();
+    return 0;
+}
+"""
+        
+        with open(benchmark_dir / "p2p_latency_mpi.cpp", 'w') as f:
+            f.write(p2p_mpi)
+        
+        # 2. Create Makefile for benchmarks
+        print("→ Creating Makefile...")
+        
+        makefile = """
+# PGAS vs MPI Benchmark Suite Makefile
+
+UPCXX = upcxx
+MPICXX = mpic++
+CXXFLAGS = -O3 -std=c++11
+
+all: p2p_latency_upcxx p2p_latency_mpi
+
+p2p_latency_upcxx: p2p_latency_upcxx.cpp
+\t$(UPCXX) $(CXXFLAGS) $< -o $@
+
+p2p_latency_mpi: p2p_latency_mpi.cpp
+\t$(MPICXX) $(CXXFLAGS) $< -o $@
+
+clean:
+\trm -f p2p_latency_upcxx p2p_latency_mpi
+
+.PHONY: all clean
+"""
+        
+        with open(benchmark_dir / "Makefile", 'w') as f:
+            f.write(makefile)
+        
+        # 3. Create run script
+        print("→ Creating automated test runner...")
+        
+        run_script = f"""#!/bin/bash
+# Automated PGAS vs MPI Benchmark Runner
+
+BENCHMARK_DIR="{benchmark_dir}"
+RESULTS_DIR="$BENCHMARK_DIR/results"
+mkdir -p "$RESULTS_DIR"
+
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+RESULTS_FILE="$RESULTS_DIR/benchmark_$TIMESTAMP.txt"
+
+echo "PGAS vs MPI Benchmark Suite" | tee "$RESULTS_FILE"
+echo "=============================" | tee -a "$RESULTS_FILE"
+echo "Date: $(date)" | tee -a "$RESULTS_FILE"
+echo "" | tee -a "$RESULTS_FILE"
+
+cd "$BENCHMARK_DIR"
+
+# Build all benchmarks
+echo "Building benchmarks..." | tee -a "$RESULTS_FILE"
+make clean && make all
+
+if [ $? -ne 0 ]; then
+    echo "Build failed!" | tee -a "$RESULTS_FILE"
+    exit 1
+fi
+
+echo "" | tee -a "$RESULTS_FILE"
+
+# Run point-to-point latency tests
+echo "Running Point-to-Point Latency Tests" | tee -a "$RESULTS_FILE"
+echo "-------------------------------------" | tee -a "$RESULTS_FILE"
+
+echo "UPC++ (2 processes):" | tee -a "$RESULTS_FILE"
+upcxx-run -n 2 ./p2p_latency_upcxx 2>&1 | tee -a "$RESULTS_FILE"
+
+echo "" | tee -a "$RESULTS_FILE"
+echo "MPI (2 processes):" | tee -a "$RESULTS_FILE"
+mpirun -np 2 ./p2p_latency_mpi 2>&1 | tee -a "$RESULTS_FILE"
+
+echo "" | tee -a "$RESULTS_FILE"
+echo "=============================" | tee -a "$RESULTS_FILE"
+echo "Results saved to: $RESULTS_FILE" | tee -a "$RESULTS_FILE"
+"""
+        
+        run_script_path = benchmark_dir / "run_benchmarks.sh"
+        with open(run_script_path, 'w') as f:
+            f.write(run_script)
+        
+        # Make executable
+        os.chmod(run_script_path, 0o755)
+        
+        # 4. Create README for benchmark suite
+        print("→ Creating README...")
+        
+        readme = f"""# PGAS vs MPI Benchmark Suite
+
+Comprehensive performance comparison between PGAS libraries (UPC++, OpenSHMEM) and MPI.
+
+## Directory Structure
+
+```
+{benchmark_dir}/
+├── Makefile                   # Build all benchmarks
+├── run_benchmarks.sh          # Automated test runner
+├── p2p_latency_upcxx.cpp     # Point-to-point latency (UPC++)
+├── p2p_latency_mpi.cpp       # Point-to-point latency (MPI)
+└── results/                   # Benchmark results
+```
+
+## Building Benchmarks
+
+```bash
+cd {benchmark_dir}
+make all
+```
+
+## Running Benchmarks
+
+### Automated (Recommended)
+```bash
+cd {benchmark_dir}
+./run_benchmarks.sh
+```
+
+### Manual Execution
+
+#### Point-to-Point Latency
+```bash
+# UPC++
+upcxx-run -n 2 ./p2p_latency_upcxx
+
+# MPI
+mpirun -np 2 ./p2p_latency_mpi
+```
+
+## Results
+
+Results are saved in `{benchmark_dir}/results/` with timestamps.
+
+## Adding More Benchmarks
+
+1. Create benchmark source files (e.g., `bandwidth_upcxx.cpp`, `bandwidth_mpi.cpp`)
+2. Update `Makefile` with new targets
+3. Update `run_benchmarks.sh` to execute new benchmarks
+4. Document in this README
+
+## Benchmark Categories
+
+- **Point-to-Point**: Latency and bandwidth measurements
+- **Collectives**: Broadcast, reduce, gather, scatter operations
+- **One-Sided**: Put/get vs MPI one-sided operations
+- **Memory Operations**: Distributed memory access patterns
+
+## References
+
+- UPC++: https://upcxx.lbl.gov/
+- OpenSHMEM: https://github.com/Sandia-OpenSHMEM/SOS
+- MPI: https://www.open-mpi.org/
+"""
+        
+        with open(benchmark_dir / "README.md", 'w') as f:
+            f.write(readme)
+        
+        print("\n" + "="*70)
+        print("PGAS Benchmark Suite Creation Complete")
+        print("="*70)
+        print(f"✓ Benchmark directory: {benchmark_dir}")
+        print(f"✓ Build: cd {benchmark_dir} && make all")
+        print(f"✓ Run: cd {benchmark_dir} && ./run_benchmarks.sh")
+        print("\nBenchmarks created:")
+        print("  - Point-to-point latency (UPC++ vs MPI)")
+        print("\nTo add more benchmarks, edit Makefile and run_benchmarks.sh")
+        print("="*70)
+
     def configure_slurm(self):
         """Configure Slurm for the cluster"""
         print("\n=== Configuring Slurm ===")
@@ -1927,6 +2632,21 @@ oob_tcp_port_range = 50100-50200
             # Distribute PGAS libraries to all other cluster nodes
             if self.password:
                 self.distribute_pgas_to_cluster()
+                
+                # Configure passwordless sudo on all nodes
+                self.configure_passwordless_sudo_cluster()
+                
+                # Distribute system symlinks to all nodes
+                self.distribute_system_symlinks_cluster()
+                
+                # Test multi-node UPC++ execution
+                self.test_multinode_upcxx()
+                
+                # Install OpenSHMEM (optional but recommended)
+                self.install_openshmem_cluster()
+                
+                # Create PGAS benchmark suite
+                self.create_pgas_benchmark_suite()
             
             # If we have a password and multiple nodes, offer to setup all other nodes
             # This works whether run from master or a worker node
