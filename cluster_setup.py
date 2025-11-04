@@ -1237,17 +1237,42 @@ rm -f $SUDO_ASKPASS
                 else:
                     self.run_sudo_command(f"apt-get install -y {tool}")
         
+        # Install required Homebrew packages for PGAS
+        print("Installing required Homebrew packages...")
+        required_packages = ["glibc", "binutils", "python3"]
+        for pkg in required_packages:
+            print(f"  - Installing {pkg}...")
+            result = self.run_command(f"brew list {pkg}", check=False)
+            if result.returncode != 0:
+                self.run_command(f"brew install {pkg}")
+        
+        # Create system symlinks for binutils and Python
+        print("Creating system symlinks for binutils and Python...")
+        symlinks = {
+            "/home/linuxbrew/.linuxbrew/opt/binutils/bin/as": "/usr/local/bin/as",
+            "/home/linuxbrew/.linuxbrew/opt/binutils/bin/ld": "/usr/local/bin/ld",
+            "/home/linuxbrew/.linuxbrew/opt/binutils/bin/ar": "/usr/local/bin/ar",
+            "/home/linuxbrew/.linuxbrew/opt/binutils/bin/ranlib": "/usr/local/bin/ranlib",
+            "/home/linuxbrew/.linuxbrew/bin/python3": "/usr/local/bin/python3",
+            "/home/linuxbrew/.linuxbrew/bin/pip3": "/usr/local/bin/pip3",
+        }
+        for source, target in symlinks.items():
+            self.run_sudo_command(f"ln -sf {source} {target}")
+            print(f"  ✓ Linked {target}")
+        
         # Get GCC and MPI paths for configuration
         gcc_bin = "/home/linuxbrew/.linuxbrew/bin/gcc"
         gxx_bin = "/home/linuxbrew/.linuxbrew/bin/g++"
         mpi_bin = "/home/linuxbrew/.linuxbrew/bin/mpicc"
         
-        # Set environment variables for compilation
+        # Set environment variables for compilation with glibc paths
+        glibc_lib = "/home/linuxbrew/.linuxbrew/Cellar/glibc/2.35_2/lib"
         env_vars = {
             "CC": gcc_bin,
             "CXX": gxx_bin,
             "MPICC": mpi_bin,
-            "PATH": f"/home/linuxbrew/.linuxbrew/bin:{os.environ.get('PATH', '')}",
+            "PATH": f"/home/linuxbrew/.linuxbrew/opt/binutils/bin:/home/linuxbrew/.linuxbrew/bin:{os.environ.get('PATH', '')}",
+            "LDFLAGS": f"-L{glibc_lib} -Wl,-rpath,{glibc_lib}",
         }
         
         # 1. Install GASNet-EX (Communication layer)

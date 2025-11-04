@@ -1385,12 +1385,31 @@ The cluster supports **Partitioned Global Address Space (PGAS)** programming mod
 ### Installation Paths
 
 - **Build Directory**: `~/cluster_build_sources` (source code and build artifacts on each node)
-- **GASNet-EX**: `/home/linuxbrew/.linuxbrew/gasnet`
-- **UPC++ Installation**: `/home/linuxbrew/.linuxbrew/upcxx`
+- **GASNet-EX**: `/home/linuxbrew/.linuxbrew/gasnet` (version 2025.8.0)
+- **UPC++ Installation**: `/home/linuxbrew/.linuxbrew/upcxx` (version 2025.10.0)
 - **OpenSHMEM**: `/home/linuxbrew/.linuxbrew/openshmem`
 - **UPC++ Compiler**: `/home/linuxbrew/.linuxbrew/bin/upcxx`
 - **UPC++ Runtime**: `/home/linuxbrew/.linuxbrew/bin/upcxx-run`
 - **Documentation**: https://upcxx.lbl.gov/docs/html/guide.html
+
+### Required System Libraries
+
+The PGAS installation requires specific system libraries from Homebrew to ensure compatibility:
+
+- **GNU Binutils 2.45**: Modern assembler and linker tools
+  - Symlinked to `/usr/local/bin/{as,ld,ar,ranlib}`
+  - Required for `.base64` assembler directive support in GASNet
+  
+- **GLIBC 2.35**: C library with newer GLIBC symbols
+  - Location: `/home/linuxbrew/.linuxbrew/Cellar/glibc/2.35_2/lib`
+  - Required for math functions (log2@GLIBC_2.29, fesetround@GLIBC_2.2.5, etc.)
+  - Linked with `-L/home/linuxbrew/.linuxbrew/Cellar/glibc/2.35_2/lib -Wl,-rpath,/home/linuxbrew/.linuxbrew/Cellar/glibc/2.35_2/lib -lm`
+
+- **Python 3.14**: Latest Homebrew Python
+  - Symlinked to `/usr/local/bin/python3` and `/usr/local/bin/pip3`
+  - Required for build scripts and configuration tools
+
+These libraries are automatically configured by the cluster setup script and distributed to all nodes.
 
 ### Cluster-Wide Installation
 
