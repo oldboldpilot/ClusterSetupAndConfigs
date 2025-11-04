@@ -247,6 +247,76 @@ class BenchmarkManager:
             print(f"✗ Error creating Berkeley UPC latency benchmark: {e}")
             return False
     
+    def create_openmp_parallel_benchmark(self, num_threads: int = 8, 
+                                        work_size: int = 10000000,
+                                        test_iterations: int = 10) -> bool:
+        """
+        Create OpenMP parallel performance benchmark from Jinja2 template.
+        
+        Args:
+            num_threads: Maximum number of threads to test
+            work_size: Amount of work per thread (iterations)
+            test_iterations: Number of test runs per thread count
+            
+        Returns:
+            bool: True if benchmark created successfully, False otherwise
+        """
+        print("\n=== Creating OpenMP Parallel Benchmark ===")
+        
+        try:
+            template = self.jinja_env.get_template("openmp_parallel.cpp.j2")
+            code = template.render(
+                num_threads=num_threads,
+                work_size=work_size,
+                test_iterations=test_iterations
+            )
+            
+            benchmark_file = self.benchmark_dir / "src" / "openmp_parallel.cpp"
+            benchmark_file.write_text(code)
+            
+            print(f"✓ Created OpenMP parallel benchmark: {benchmark_file}")
+            print(f"  Max threads: {num_threads}, Work size: {work_size}, Test iterations: {test_iterations}")
+            return True
+            
+        except Exception as e:
+            print(f"✗ Error creating OpenMP parallel benchmark: {e}")
+            return False
+    
+    def create_hybrid_mpi_openmp_benchmark(self, num_threads: int = 4, 
+                                          work_size: int = 5000000,
+                                          test_iterations: int = 10) -> bool:
+        """
+        Create hybrid MPI+OpenMP benchmark from Jinja2 template.
+        
+        Args:
+            num_threads: Number of OpenMP threads per MPI process
+            work_size: Amount of work per thread (iterations)
+            test_iterations: Number of test runs
+            
+        Returns:
+            bool: True if benchmark created successfully, False otherwise
+        """
+        print("\n=== Creating Hybrid MPI+OpenMP Benchmark ===")
+        
+        try:
+            template = self.jinja_env.get_template("hybrid_mpi_openmp.cpp.j2")
+            code = template.render(
+                num_threads=num_threads,
+                work_size=work_size,
+                test_iterations=test_iterations
+            )
+            
+            benchmark_file = self.benchmark_dir / "src" / "hybrid_mpi_openmp.cpp"
+            benchmark_file.write_text(code)
+            
+            print(f"✓ Created hybrid MPI+OpenMP benchmark: {benchmark_file}")
+            print(f"  Threads/process: {num_threads}, Work size: {work_size}, Test iterations: {test_iterations}")
+            return True
+            
+        except Exception as e:
+            print(f"✗ Error creating hybrid MPI+OpenMP benchmark: {e}")
+            return False
+    
     def create_makefile(self, config: Optional[Dict] = None) -> bool:
         """
         Create Makefile for compiling benchmarks from Jinja2 template.
@@ -265,14 +335,18 @@ class BenchmarkManager:
             'mpi_compiler': 'mpicxx',
             'openshmem_compiler': 'oshcc',
             'berkeley_upc_compiler': 'upcc',
+            'cxx_compiler': 'g++',
             'upcxx_flags': '-std=c++23 -O3',
             'mpi_flags': '-std=c++23 -O3',
             'openshmem_flags': '-std=c++23 -O3',
             'berkeley_upc_flags': '-O3',
+            'openmp_flags': '-std=c++23 -O3 -fopenmp',
             'benchmarks': [
                 'upcxx_latency',
                 'upcxx_bandwidth',
                 'mpi_latency',
+                'openmp_parallel',
+                'hybrid_mpi_openmp',
                 'openshmem_latency',
                 'berkeley_upc_latency'
             ]

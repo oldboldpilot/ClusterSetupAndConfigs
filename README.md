@@ -702,9 +702,17 @@ sinfo          # View node status
 scontrol show nodes  # Detailed node information
 ```
 
-3. **Test MPI**:
+3. **Test MPI** (with optimal flags):
 ```bash
-mpirun -np 4 -hostfile ~/.openmpi/hostfile hostname
+# Basic test
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal hostname
+
+# MCA parameters for cluster communication
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --mca btl_tcp_if_include eth0 \
+       --mca oob_tcp_if_include eth0 \
+       --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./my_program
 ```
 
 4. **Submit a test Slurm job**:
@@ -780,7 +788,14 @@ For optimal MPI+OpenMP hybrid parallelism:
 # Run 1 MPI process per node with maximum OpenMP threads
 # This is the RECOMMENDED configuration for most workloads
 unset OMP_NUM_THREADS  # Let OpenMP auto-detect max threads
-mpirun --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./my_program
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./my_program
+
+# With MCA parameters for network optimization:
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --mca btl_tcp_if_include eth0 \
+       --mca oob_tcp_if_include eth0 \
+       --map-by node -np 4 --hostfile ~/.openmpi/hostfile_optimal ./my_program
 ```
 
 **Benefits:**
@@ -807,6 +822,145 @@ mpirun --map-by node -np 152 --hostfile ~/.openmpi/hostfile_max ./my_program
 ```
 
 **When to use:** When your application requires fine-grained MPI parallelism and minimal per-process memory usage.
+
+### MPI Command Best Practices ⭐
+
+**Always use these flags for reliable cluster execution:**
+
+```bash
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node \
+       -np <num_processes> \
+       --hostfile ~/.openmpi/hostfile_optimal \
+       ./your_program
+```
+
+**Key flags explained:**
+- `--prefix` - Ensures consistent Open MPI version across all nodes
+- `--map-by node` - Distributes processes evenly across nodes (1 per node recommended)
+- `-np` - Number of MPI processes to launch
+- `--hostfile` - Specifies which nodes to use
+
+**Optional MCA parameters (omit if interface names vary across nodes):**
+```bash
+--mca btl_tcp_if_include ens1f0  # Use specific network interface (if consistent)
+--mca oob_tcp_if_include ens1f0  # Out-of-band communication interface
+--mca btl ^openib                # Disable InfiniBand if not available
+```
+
+**⚠️ Important:** Network interface names may vary across nodes (`ens1f0`, `enp1s0`, `eth0`, etc.). **Omit interface restrictions unless all nodes use identical naming.**
+
+### Dual Network Card Configuration ⚠️
+
+**Problem:** Nodes with multiple network interfaces can cause MPI communication failures or routing issues.
+
+**Symptoms:**
+- MPI jobs hang or time out
+- "No network interfaces found for out-of-band communications" errors
+- SSH connections work but MPI fails
+
+**Solution 1: Let MPI Auto-detect (Recommended)**
+```bash
+# Don't specify network interfaces - let Open MPI choose
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node -np 4 \
+       --hostfile ~/.openmpi/hostfile_optimal \
+       ./my_program
+```
+
+**Solution 2: Use IP addresses in hostfile**
+```bash
+# In ~/.openmpi/hostfile_optimal - use specific subnet IPs
+192.168.1.147 slots=1  # Cluster network
+192.168.1.139 slots=1
+192.168.1.96 slots=1
+192.168.1.136 slots=1
+```
+
+**Solution 3: Route table configuration (if needed)**
+```bash
+# Check current routing
+ip route show
+
+# Ensure cluster subnet has correct priority
+# Add route if needed (example):
+sudo ip route add 192.168.1.0/24 dev ens1f0 metric 100
+```
+
+**Solution 4: Specify interface only if ALL nodes have same naming**
+```bash
+# Only if ALL nodes use 'ens1f0' for cluster network
+mpirun --mca btl_tcp_if_include ens1f0 \
+       --mca oob_tcp_if_include ens1f0 \
+       ...
+```
+
+### SSH Key Distribution for All Node Pairs 🔑
+
+**Critical for MPI:** SSH keys must be distributed between **every pair** of nodes, not just from master to workers.
+
+**Quick distribution script:**
+```bash
+# On each node, ensure SSH key exists
+for node in 192.168.1.147 192.168.1.139 192.168.1.96 192.168.1.136; do
+  ssh $node "test -f ~/.ssh/id_rsa || ssh-keygen -t rsa -N '' -f ~/.ssh/id_rsa"
+done
+
+# Distribute each node's key to all other nodes
+for src in 192.168.1.147 192.168.1.139 192.168.1.96 192.168.1.136; do
+  for dst in 192.168.1.147 192.168.1.139 192.168.1.96 192.168.1.136; do
+    if [ "$src" != "$dst" ]; then
+      ssh $src "ssh-copy-id -i ~/.ssh/id_rsa.pub muyiwa@$dst"
+    fi
+  done
+done
+
+# Verify passwordless SSH between all pairs
+pdsh -w 192.168.1.139,192.168.1.96,192.168.1.136 \
+  'for node in 192.168.1.147 192.168.1.139 192.168.1.96 192.168.1.136; do 
+     ssh -o BatchMode=yes $node echo "OK from $(hostname) to $node" || echo "FAIL"; 
+   done'
+```
+
+### UPC++ Execution Best Practices
+
+**UPC++ requires specific environment and network configuration:**
+
+```bash
+# Local shared memory execution (testing)
+GASNET_SPAWNFN=L UPCXX_NETWORK=smp upcxx-run -n 4 ./upcxx_program
+
+# Cluster execution with SSH spawning
+GASNET_SPAWNFN=S \
+GASNET_SSH_SERVERS="node1 node2 node3 node4" \
+upcxx-run -n 4 ./upcxx_program
+
+# With specific network backend (UDP for Ethernet)
+GASNET_SPAWNFN=S \
+UPCXX_NETWORK=udp \
+GASNET_SSH_SERVERS="192.168.1.147 192.168.1.139 192.168.1.96 192.168.1.136" \
+upcxx-run -n 4 ./upcxx_program
+```
+
+**Key environment variables:**
+- `GASNET_SPAWNFN` - Spawning mechanism: `L` (local), `S` (SSH), `M` (MPI)
+- `UPCXX_NETWORK` - Network backend: `smp`, `udp`, `ibv`, `aries`
+- `GASNET_SSH_SERVERS` - Space-separated list of nodes for SSH spawning
+
+### OpenSHMEM Execution Best Practices
+
+**OpenSHMEM uses oshrun launcher:**
+
+```bash
+# Basic execution
+oshrun -np 4 --hostfile ~/.openmpi/hostfile_optimal ./openshmem_program
+
+# With network specification
+oshrun -np 4 \
+       --mca btl_tcp_if_include eth0 \
+       --hostfile ~/.openmpi/hostfile_optimal \
+       ./openshmem_program
+```
 
 ### Choosing the Right Hostfile
 

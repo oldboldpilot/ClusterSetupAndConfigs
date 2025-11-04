@@ -15,14 +15,14 @@
 
 using namespace std;
 using namespace std::chrono;
-namespace ranges = std::ranges;
 
-// Simple function for RPC ping
-int ping_response() {
+
+// Simple function for RPC ping - C++23 trailing return type
+auto ping_response() -> int {
     return 42;
 }
 
-void measure_latency(int iterations = {{ iterations }}) {
+auto measure_latency(int iterations = {{ iterations }}) -> void {
     upcxx::init();
     
     int rank = upcxx::rank_me();
@@ -66,9 +66,9 @@ void measure_latency(int iterations = {{ iterations }}) {
             }
             
             // Calculate statistics using C++23 ranges and algorithms
-            ranges::sort(latencies);
-            double min_lat = ranges::min(latencies);
-            double max_lat = ranges::max(latencies);
+            std::sort(latencies.begin(), latencies.end());
+            double min_lat = *std::min_element(latencies.begin(), latencies.end());
+            double max_lat = *std::max_element(latencies.begin(), latencies.end());
             double median_lat = latencies[latencies.size() / 2];
             double avg_lat = std::reduce(latencies.begin(), latencies.end(), 0.0) / latencies.size();
             

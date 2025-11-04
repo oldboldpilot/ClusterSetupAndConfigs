@@ -376,6 +376,22 @@ class ClusterSetup:
             warmup_iterations=100
         )
         
+        # Generate OpenMP parallel benchmark
+        print("→ Generating OpenMP parallel benchmark...")
+        self.benchmark_mgr.create_openmp_parallel_benchmark(
+            num_threads=8,
+            work_size=10000000,
+            test_iterations=10
+        )
+        
+        # Generate hybrid MPI+OpenMP benchmark
+        print("→ Generating hybrid MPI+OpenMP benchmark...")
+        self.benchmark_mgr.create_hybrid_mpi_openmp_benchmark(
+            num_threads=4,
+            work_size=5000000,
+            test_iterations=10
+        )
+        
         # Generate Makefile
         print("→ Generating Makefile...")
         self.benchmark_mgr.create_makefile()

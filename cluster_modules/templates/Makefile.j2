@@ -10,12 +10,14 @@ UPCXX = {{ upcxx_compiler }}
 MPICXX = {{ mpi_compiler }}
 OSHCC = {{ openshmem_compiler }}
 UPCC = {{ berkeley_upc_compiler }}
+CXX_COMPILER = {{ cxx_compiler }}
 
 # Compiler flags
 UPCXX_FLAGS = {{ upcxx_flags }}
 MPICXX_FLAGS = {{ mpi_flags }}
 OSHCC_FLAGS = {{ openshmem_flags }}
 UPCC_FLAGS = {{ berkeley_upc_flags }}
+OPENMP_FLAGS = {{ openmp_flags }}
 
 # Directories
 SRC_DIR = src
@@ -54,6 +56,16 @@ openshmem_latency: $(SRC_DIR)/openshmem_latency.cpp
 berkeley_upc_latency: $(SRC_DIR)/berkeley_upc_latency.c
 	@echo "Compiling Berkeley UPC latency benchmark..."
 	$(UPCC) $(UPCC_FLAGS) $< -o $(BIN_DIR)/$@
+
+# OpenMP benchmarks
+openmp_parallel: $(SRC_DIR)/openmp_parallel.cpp
+	@echo "Compiling OpenMP parallel benchmark..."
+	$(CXX_COMPILER) $(OPENMP_FLAGS) $< -o $(BIN_DIR)/$@
+
+# Hybrid MPI+OpenMP benchmarks
+hybrid_mpi_openmp: $(SRC_DIR)/hybrid_mpi_openmp.cpp
+	@echo "Compiling hybrid MPI+OpenMP benchmark..."
+	$(MPICXX) $(MPICXX_FLAGS) -fopenmp $< -o $(BIN_DIR)/$@
 
 # Clean targets
 clean:

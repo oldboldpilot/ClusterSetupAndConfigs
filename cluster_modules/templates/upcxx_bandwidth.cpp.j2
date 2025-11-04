@@ -15,9 +15,9 @@
 
 using namespace std;
 using namespace std::chrono;
-namespace ranges = std::ranges;
 
-void measure_bandwidth(int iterations = {{ iterations }}) {
+
+auto measure_bandwidth(int iterations = {{ iterations }}) -> void {
     upcxx::init();
     
     int rank = upcxx::rank_me();
@@ -64,9 +64,9 @@ void measure_bandwidth(int iterations = {{ iterations }}) {
             }
             
             // Calculate statistics using C++23 ranges and algorithms
-            ranges::sort(bandwidths);
-            double min_bw = ranges::min(bandwidths);
-            double max_bw = ranges::max(bandwidths);
+            std::sort(bandwidths.begin(), bandwidths.end());
+            double min_bw = *std::min_element(bandwidths.begin(), bandwidths.end());
+            double max_bw = *std::max_element(bandwidths.begin(), bandwidths.end());
             double median_bw = bandwidths[bandwidths.size() / 2];
             double avg_bw = std::reduce(bandwidths.begin(), bandwidths.end(), 0.0) / bandwidths.size();
             

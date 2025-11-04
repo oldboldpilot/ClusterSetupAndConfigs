@@ -45,7 +45,11 @@ run_benchmark() {
             upcxx-run -n ${NUM_PROCS} "${binary}" | tee "${result_file}"
             ;;
         mpirun)
-            mpirun -np ${NUM_PROCS} "${binary}" | tee "${result_file}"
+            # MCA parameters to suppress warnings and handle BTL issues
+            mpirun --mca btl_base_warn_component_unused 0 \
+                   --mca btl ^openib \
+                   --allow-run-as-root \
+                   -np ${NUM_PROCS} "${binary}" | tee "${result_file}"
             ;;
         oshrun)
             oshrun -n ${NUM_PROCS} "${binary}" | tee "${result_file}"
