@@ -2,6 +2,36 @@
 
 This directory contains modular components for HPC cluster setup, configuration, and management.
 
+## Recent Updates (November 4, 2025)
+
+**NEW: HomebrewManager** - Automated GCC 15.2.0 and Binutils 2.45 management
+- Installs Homebrew, GCC, binutils, Python 3.14
+- Creates automated symlinks: `gcc -> gcc-15`, `g++ -> g++-15`, `gfortran -> gfortran-15`
+- Post-installation verification and fixing
+- Configures environment variables in `.bashrc` and `.ssh/environment`
+
+**NEW: PDSHManager** - Parallel Distributed Shell operations
+- Multi-OS pdsh installation (Homebrew, apt, dnf, yum, zypper)
+- Hostfile management (`~/.pdsh/machines`)
+- Environment configuration (`PDSH_RCMD_TYPE=ssh`)
+- Parallel command execution across cluster
+
+**BenchmarkManager Refactored** - Jinja2 template-based generation
+- 7 Jinja2 templates for dynamic code generation
+- Configurable iterations, message sizes, warmup parameters
+- Templates: UPC++ latency/bandwidth, MPI, OpenSHMEM, Berkeley UPC, Makefile, run scripts
+- 554 lines (previously hardcoded strings)
+
+**Testing Enhanced** - 41 new tests added
+- `test_benchmark_templates.py`: 22 tests for Jinja2 rendering and syntax
+- `test_pdsh.py`: 19 tests for pdsh installation and operations
+- All 41 new tests passing ✅
+
+**Documentation:**
+- `REFACTORING_DOCUMENTATION.md`: Complete refactoring details (699 lines)
+- `COMPILER_UPDATE_SUMMARY.md`: GCC 15.2.0 upgrade documentation (142 lines)
+- See these files for comprehensive change logs
+
 ## Module Overview
 
 ### Core Infrastructure Modules
