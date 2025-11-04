@@ -257,13 +257,13 @@ class ClusterSetup:
             with open(shell_profile, 'a') as f:
                 f.write('\n# Homebrew\n')
                 f.write(f'eval "$({homebrew_path}/brew shellenv)"\n')
-                f.write('\n# Always use Homebrew GCC for compilation\n')
-                f.write(f'export CC={homebrew_path}/gcc-11\n')
-                f.write(f'export CXX={homebrew_path}/g++-11\n')
-                f.write(f'export FC={homebrew_path}/gfortran-11\n')
-                f.write(f'export OMPI_CC={homebrew_path}/gcc-11\n')
-                f.write(f'export OMPI_CXX={homebrew_path}/g++-11\n')
-                f.write(f'export OMPI_FC={homebrew_path}/gfortran-11\n')
+                f.write('\n# Always use latest Homebrew GCC for compilation\n')
+                f.write(f'export CC={homebrew_path}/gcc\n')
+                f.write(f'export CXX={homebrew_path}/g++\n')
+                f.write(f'export FC={homebrew_path}/gfortran\n')
+                f.write(f'export OMPI_CC={homebrew_path}/gcc\n')
+                f.write(f'export OMPI_CXX={homebrew_path}/g++\n')
+                f.write(f'export OMPI_FC={homebrew_path}/gfortran\n')
         
         print("Homebrew installed successfully")
     
@@ -361,13 +361,13 @@ class ClusterSetup:
             ssh_env = ssh_dir / "environment"
             with open(ssh_env, 'w') as f:
                 f.write(f"PATH={homebrew_path}:{homebrew_sbin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n")
-                # Set compiler environment variables to always use Homebrew GCC
-                f.write(f"CC={homebrew_path}/gcc-11\n")
-                f.write(f"CXX={homebrew_path}/g++-11\n")
-                f.write(f"FC={homebrew_path}/gfortran-11\n")
-                f.write(f"OMPI_CC={homebrew_path}/gcc-11\n")
-                f.write(f"OMPI_CXX={homebrew_path}/g++-11\n")
-                f.write(f"OMPI_FC={homebrew_path}/gfortran-11\n")
+                # Set compiler environment variables to always use latest Homebrew GCC
+                f.write(f"CC={homebrew_path}/gcc\n")
+                f.write(f"CXX={homebrew_path}/g++\n")
+                f.write(f"FC={homebrew_path}/gfortran\n")
+                f.write(f"OMPI_CC={homebrew_path}/gcc\n")
+                f.write(f"OMPI_CXX={homebrew_path}/g++\n")
+                f.write(f"OMPI_FC={homebrew_path}/gfortran\n")
             
             ssh_env.chmod(0o600)
             print("✓ Created ~/.ssh/environment with Homebrew compiler settings")
@@ -1081,14 +1081,8 @@ rm -f $SUDO_ASKPASS
             self.run_command(f"ln -sf {homebrew_bin}/g++-{gcc_version} {homebrew_bin}/g++", check=False)
             self.run_command(f"ln -sf {homebrew_bin}/gfortran-{gcc_version} {homebrew_bin}/gfortran", check=False)
             
-            # Also create gcc-11 symlinks for OpenMPI compatibility (prebuilt bottles expect gcc-11)
-            self.run_command(f"ln -sf {homebrew_bin}/gcc-{gcc_version} {homebrew_bin}/gcc-11", check=False)
-            self.run_command(f"ln -sf {homebrew_bin}/g++-{gcc_version} {homebrew_bin}/g++-11", check=False)
-            self.run_command(f"ln -sf {homebrew_bin}/gfortran-{gcc_version} {homebrew_bin}/gfortran-11", check=False)
-            
             print(f"✓ Created compiler symlinks:")
-            print(f"  gcc/g++/gfortran -> gcc-{gcc_version} (default)")
-            print(f"  gcc-11 -> gcc-{gcc_version} (OpenMPI compatibility)")
+            print(f"  gcc/g++/gfortran -> gcc-{gcc_version} (latest from Homebrew)")
         else:
             print("⚠️  Could not detect GCC version for symlink creation")
         
@@ -2610,16 +2604,51 @@ oob_tcp_port_range = 50100-50200
                 print("Running in non-interactive mode, continuing...")
         
         try:
-            # Setup steps for current node
-            self.install_homebrew()
-            self.configure_system_path()  # Configure PATH after Homebrew installation
+            # Step 1: SSH and Security (FIRST - enables remote operations)
+            print("\n" + "="*60)
+            print("STEP 1: SSH Keys and Passwordless Sudo")
+            print("="*60)
             self.setup_ssh()
             self.configure_passwordless_ssh()
             self.configure_hosts_file()
+            
+            # Step 2: Homebrew and Core Tools (SECOND - base dependencies)
+            print("\n" + "="*60)
+            print("STEP 2: Homebrew and Core Development Tools")
+            print("="*60)
+            self.install_homebrew()
+            self.configure_system_path()  # Configure PATH after Homebrew installation
+            
+            # Step 3: Install and configure GCC, binutils, Python (THIRD - compilers)
+            print("\n" + "="*60)
+            print("STEP 3: Compilers and Build Tools")
+            print("="*60)
+            # GCC symlinks are created in install_openmpi, but we need them earlier
+            # So let's create them here if they don't exist
+            homebrew_bin = "/home/linuxbrew/.linuxbrew/bin"
+            gcc_version_result = self.run_command(f"ls {homebrew_bin}/gcc-* 2>/dev/null | grep -E 'gcc-[0-9]+$' | head -1", check=False)
+            if gcc_version_result.returncode == 0 and gcc_version_result.stdout.strip():
+                gcc_path = gcc_version_result.stdout.strip()
+                gcc_version = gcc_path.split('-')[-1]
+                print(f"Creating GCC {gcc_version} symlinks...")
+                self.run_command(f"ln -sf {homebrew_bin}/gcc-{gcc_version} {homebrew_bin}/gcc", check=False)
+                self.run_command(f"ln -sf {homebrew_bin}/g++-{gcc_version} {homebrew_bin}/g++", check=False)
+                self.run_command(f"ln -sf {homebrew_bin}/gfortran-{gcc_version} {homebrew_bin}/gfortran", check=False)
+                print(f"✓ GCC symlinks: gcc/g++/gfortran -> gcc-{gcc_version}")
+            
+            # Step 4: Parallel Programming Libraries (FOURTH - main software)
+            print("\n" + "="*60)
+            print("STEP 4: Parallel Programming Libraries")
+            print("="*60)
             self.install_slurm()
             self.install_openmpi()
             self.install_openmp()
             self.install_upcxx_and_pgas()
+            
+            # Step 5: Configuration (FIFTH - finalize setup)
+            print("\n" + "="*60)
+            print("STEP 5: Configuration and Firewall")
+            print("="*60)
             self.configure_firewall_for_mpi()
             self.configure_slurm()
             self.configure_openmpi()

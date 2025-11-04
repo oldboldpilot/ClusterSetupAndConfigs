@@ -249,6 +249,104 @@ openshmem_mgr.build_openshmem()
 openshmem_mgr.distribute_openshmem_pdsh()
 ```
 
+## Compiler Configuration
+
+The cluster setup uses **latest GCC and Binutils from Homebrew** on all nodes for consistency and modern C++20/23 support.
+
+### Installed Compilers
+
+| Compiler | Version | Source | Purpose |
+|----------|---------|--------|---------|
+| **GCC** | 15.2.0 | Homebrew | C compiler |
+| **G++** | 15.2.0 | Homebrew | C++ compiler (C++23 support) |
+| **Gfortran** | 15.2.0 | Homebrew | Fortran compiler |
+| **Binutils** | 2.45 | Homebrew | GNU assembler, linker, archiver |
+
+### Automatic Symlink Configuration
+
+During `install_openmpi()`, the setup automatically creates symlinks to the latest GCC version:
+
+```bash
+/home/linuxbrew/.linuxbrew/bin/gcc -> gcc-15
+/home/linuxbrew/.linuxbrew/bin/g++ -> g++-15
+/home/linuxbrew/.linuxbrew/bin/gfortran -> gfortran-15
+```
+
+**This happens automatically on ALL nodes during cluster setup.**
+
+### Environment Variables
+
+The following environment variables are configured cluster-wide in `~/.bashrc` and `~/.ssh/environment`:
+
+```bash
+# Compiler Selection
+export CC=/home/linuxbrew/.linuxbrew/bin/gcc
+export CXX=/home/linuxbrew/.linuxbrew/bin/g++
+export FC=/home/linuxbrew/.linuxbrew/bin/gfortran
+
+# OpenMPI Compiler Wrappers
+export OMPI_CC=/home/linuxbrew/.linuxbrew/bin/gcc
+export OMPI_CXX=/home/linuxbrew/.linuxbrew/bin/g++
+export OMPI_FC=/home/linuxbrew/.linuxbrew/bin/gfortran
+
+# PATH (prioritizes Homebrew binutils and GCC)
+export PATH=/home/linuxbrew/.linuxbrew/opt/binutils/bin:/home/linuxbrew/.linuxbrew/bin:$PATH
+```
+
+### Binutils Tools
+
+Binutils from Homebrew provides modern versions of essential build tools:
+
+| Tool | Version | Path | Purpose |
+|------|---------|------|---------|
+| **as** | 2.45 | `/home/linuxbrew/.linuxbrew/opt/binutils/bin/as` | GNU assembler |
+| **ld** | 2.45 | `/home/linuxbrew/.linuxbrew/opt/binutils/bin/ld` | GNU linker |
+| **ar** | 2.45 | `/home/linuxbrew/.linuxbrew/opt/binutils/bin/ar` | Archive manager |
+| **ranlib** | 2.45 | `/home/linuxbrew/.linuxbrew/opt/binutils/bin/ranlib` | Symbol table generator |
+
+### System Symlinks
+
+The setup creates system-wide symlinks for binutils tools (requires sudo):
+
+```bash
+/usr/local/bin/as -> /home/linuxbrew/.linuxbrew/opt/binutils/bin/as
+/usr/local/bin/ld -> /home/linuxbrew/.linuxbrew/opt/binutils/bin/ld
+/usr/local/bin/ar -> /home/linuxbrew/.linuxbrew/opt/binutils/bin/ar
+/usr/local/bin/ranlib -> /home/linuxbrew/.linuxbrew/opt/binutils/bin/ranlib
+```
+
+### Verification
+
+After cluster setup, verify compilers on any node:
+
+```bash
+# Check GCC version
+gcc --version  # Should show: gcc (Homebrew GCC 15.2.0) 15.2.0
+
+# Check G++ version
+g++ --version  # Should show: g++ (Homebrew GCC 15.2.0) 15.2.0
+
+# Check Fortran version
+gfortran --version  # Should show: GNU Fortran (Homebrew GCC 15.2.0) 15.2.0
+
+# Check Binutils
+as --version  # Should show: GNU assembler (GNU Binutils) 2.45
+ld --version  # Should show: GNU ld (GNU Binutils) 2.45
+
+# Verify symlinks
+ls -la /home/linuxbrew/.linuxbrew/bin/gcc
+ls -la /home/linuxbrew/.linuxbrew/bin/g++
+ls -la /home/linuxbrew/.linuxbrew/bin/gfortran
+```
+
+### Why Latest GCC?
+
+- **C++23 Support**: Modern C++ features for UPC++ and benchmarks
+- **Better Optimization**: Improved vectorization and code generation
+- **Bug Fixes**: Latest compiler bug fixes and stability improvements
+- **Consistency**: Same compiler version across all cluster nodes
+- **Homebrew Integration**: Seamless updates via `brew upgrade gcc`
+
 **See**: [`cluster_modules/README.md`](cluster_modules/README.md) for complete documentation.
 
 ### Configuration File
