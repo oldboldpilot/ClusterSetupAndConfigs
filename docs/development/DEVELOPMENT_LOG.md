@@ -533,3 +533,78 @@ This development session successfully modernized the cluster setup infrastructur
 The system is now production-ready with clear paths forward for remaining issues (Ubuntu sudo, WSL firewall). All work is version-controlled with descriptive commits and pushed to GitHub.
 
 **Status:** Ready for comprehensive testing phase.
+
+## Directory Consolidation (November 4, 2025)
+
+### Problem
+Build, test, and configuration directories were scattered across the home directory on all cluster nodes, making it difficult to manage, backup, and understand the project structure.
+
+**Scattered directories:**
+- `~/Development/ClusterSetupAndConfigs` - Configuration and setup scripts
+- `~/tests/` - Test files
+- `~/openshmem_build/` - Framework build directory
+- `~/test_openmp_*/` - OpenMP test directories
+- `~/cluster_benchmark_results/` - Benchmark results
+- `~/cluster_build_sources/` - Already existed but incomplete
+
+### Solution
+Consolidated all cluster-related directories under a single `cluster_build_sources/` directory with clear subdirectories:
+
+```
+~/cluster_build_sources/
+├── benchmarks/          # Compiled benchmarks and executables
+├── config/              # Configuration and setup
+│   └── ClusterSetupAndConfigs/  # Main project repo
+├── frameworks/          # Framework build directories
+│   └── openshmem_build/
+├── testing/             # All test files
+│   ├── tests/
+│   ├── test_openmp_env/
+│   ├── test_openmp_gcc/
+│   └── test_openmp_parallel/
+├── results/             # Benchmark results
+├── GASNet-*/            # PGAS framework sources
+├── upcxx-*/             # UPC++ sources
+└── *.sh                 # Setup scripts
+```
+
+### Changes Made
+
+1. **Directory Moves:**
+   - `~/Development/ClusterSetupAndConfigs` → `~/cluster_build_sources/config/ClusterSetupAndConfigs`
+   - `~/tests/` → `~/cluster_build_sources/testing/tests/`
+   - `~/openshmem_build/` → `~/cluster_build_sources/frameworks/openshmem_build/`
+   - `~/test_openmp_*/` → `~/cluster_build_sources/testing/test_openmp_*/`
+   - `~/cluster_benchmark_results/` → `~/cluster_build_sources/results/`
+
+2. **Backward Compatibility Symlinks:**
+   - `~/Development/ClusterSetupAndConfigs` → `~/cluster_build_sources/config/ClusterSetupAndConfigs`
+   - `~/cluster_benchmark_results` → `~/cluster_build_sources/results`
+
+3. **Updated `cluster_modules/benchmark_manager.py`:**
+   - Modified `clean_install()` method to remove entire `cluster_build_sources/` directory
+   - Added removal of scattered directories (openshmem_build, test_openmp_*, tests, results)
+   - Comprehensive cleanup ensures fresh installation removes all cluster-related files
+
+4. **Synced to All Worker Nodes:**
+   - Applied same structure to all worker nodes (192.168.1.139, 192.168.1.96, 192.168.1.147)
+   - Created symlinks on all nodes for backward compatibility
+   - Cleaned up old scattered directories
+
+### Testing
+- ✅ `config_template_manager.py` works with new paths
+- ✅ `benchmark_runner.py` works with new paths
+- ✅ MPI communication works with new test locations
+- ✅ Symlinks provide backward compatibility
+
+### Benefits
+1. **Single Source of Truth:** All cluster-related files in one place
+2. **Easy Backup:** Single directory to backup/restore
+3. **Clear Organization:** Logical subdirectories by purpose
+4. **Clean Install:** Single directory removal for complete cleanup
+5. **Scalability:** Easy to add new frameworks or test types
+6. **Documentation:** Clear structure makes onboarding easier
+
+### Commit
+Changes committed with message documenting directory consolidation and rationale.
+
