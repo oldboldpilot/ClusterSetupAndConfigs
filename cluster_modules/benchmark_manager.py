@@ -681,8 +681,7 @@ class BenchmarkManager:
         Returns:
             bool: True if clean install successful
         """
-        print("
-" + "="*70)
+        print("\n" + "="*70)
         print("CLEAN INSTALL - REMOVING ALL EXISTING CONFIGURATIONS")
         print("="*70)
         
@@ -693,22 +692,19 @@ class BenchmarkManager:
             # Remove entire cluster_build_sources directory
             cluster_sources = home / "cluster_build_sources"
             if cluster_sources.exists():
-                print(f"
-→ Removing cluster_build_sources directory: {cluster_sources}")
+                print(f"\n→ Removing cluster_build_sources directory: {cluster_sources}")
                 shutil.rmtree(cluster_sources)
                 print(f"  ✓ Removed {cluster_sources}")
             
             # Remove Development/ClusterSetupAndConfigs symlink
             dev_link = home / "Development" / "ClusterSetupAndConfigs"
             if dev_link.is_symlink():
-                print(f"
-→ Removing symlink: {dev_link}")
+                print(f"\n→ Removing symlink: {dev_link}")
                 dev_link.unlink()
                 print(f"  ✓ Removed {dev_link}")
             
             # Remove scattered framework build directories
-            print(f"
-→ Removing scattered framework directories...")
+            print(f"\n→ Removing scattered framework directories...")
             framework_dirs = ['openshmem_build', 'upcxx-build', 'GASNet-build']
             for dir_name in framework_dirs:
                 dir_path = home / dir_name
@@ -717,8 +713,7 @@ class BenchmarkManager:
                     print(f"  ✓ Removed {dir_path}")
             
             # Remove scattered test directories
-            print(f"
-→ Removing scattered test directories...")
+            print(f"\n→ Removing scattered test directories...")
             test_dirs = ['tests', 'test_openmp_env', 'test_openmp_gcc', 'test_openmp_parallel']
             for dir_name in test_dirs:
                 dir_path = home / dir_name
@@ -726,19 +721,21 @@ class BenchmarkManager:
                     shutil.rmtree(dir_path)
                     print(f"  ✓ Removed {dir_path}")
             
-            # Remove cluster_benchmark_results
-            results_dir = home / "cluster_benchmark_results"
-            if results_dir.exists():
-                print(f"
-→ Removing benchmark results: {results_dir}")
-                shutil.rmtree(results_dir)
-                print(f"  ✓ Removed {results_dir}")
+            # Remove cluster_benchmark_results (symlink or directory)
+            results_link = home / "cluster_benchmark_results"
+            if results_link.is_symlink():
+                print(f"\n→ Removing benchmark results symlink: {results_link}")
+                results_link.unlink()
+                print(f"  ✓ Removed {results_link}")
+            elif results_link.exists():
+                print(f"\n→ Removing benchmark results directory: {results_link}")
+                shutil.rmtree(results_link)
+                print(f"  ✓ Removed {results_link}")
             
             # Remove SSH keys
             ssh_dir = home / ".ssh"
             if ssh_dir.exists():
-                print(f"
-→ Removing SSH keys...")
+                print(f"\n→ Removing SSH keys...")
                 for key_file in ['id_rsa', 'id_rsa.pub', 'id_ed25519', 'id_ed25519.pub']:
                     key_path = ssh_dir / key_file
                     if key_path.exists():
@@ -754,22 +751,19 @@ class BenchmarkManager:
             # Remove OpenMPI hostfiles
             openmpi_dir = home / ".openmpi"
             if openmpi_dir.exists():
-                print(f"
-→ Removing OpenMPI hostfiles...")
+                print(f"\n→ Removing OpenMPI hostfiles...")
                 shutil.rmtree(openmpi_dir)
                 print(f"  ✓ Removed {openmpi_dir}")
             
             # Remove pdsh hostfile
             pdsh_dir = home / ".pdsh"
             if pdsh_dir.exists():
-                print(f"
-→ Removing pdsh hostfiles...")
+                print(f"\n→ Removing pdsh hostfiles...")
                 shutil.rmtree(pdsh_dir)
                 print(f"  ✓ Removed {pdsh_dir}")
             
             # Remove GCC symlinks
-            print(f"
-→ Removing GCC compatibility symlinks...")
+            print(f"\n→ Removing GCC compatibility symlinks...")
             linuxbrew_bin = Path("/home/linuxbrew/.linuxbrew/bin")
             if linuxbrew_bin.exists():
                 for symlink in ['gcc-11', 'g++-11', 'gfortran-11', 'gcc-12', 'g++-12', 'gfortran-12']:
@@ -779,8 +773,7 @@ class BenchmarkManager:
                         print(f"  ✓ Removed {symlink_path}")
             
             # Remove system binutils symlinks
-            print(f"
-→ Removing system binutils symlinks...")
+            print(f"\n→ Removing system binutils symlinks...")
             for tool in ['as', 'ld', 'ar', 'ranlib', 'python3', 'pip3']:
                 symlink_path = Path(f"/usr/local/bin/{tool}")
                 if symlink_path.is_symlink():
@@ -790,21 +783,17 @@ class BenchmarkManager:
                     except:
                         pass
             
-            print(f"
-{'='*70}")
+            print(f"\n{'='*70}")
             print("✓ CLEAN INSTALL COMPLETED - All configurations removed")
             print("  Ready for fresh installation")
             print("  cluster_build_sources will be recreated during setup")
-            print(f"{'='*70}
-")
+            print(f"{'='*70}\n")
             
             return True
             
         except Exception as e:
-            print(f"
-✗ Error during clean install: {e}")
+            print(f"\n✗ Error during clean install: {e}")
             import traceback
             traceback.print_exc()
             return False
-
 
