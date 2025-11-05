@@ -1,0 +1,28 @@
+{#
+MPI Hostfile Template
+Generates hostfile for mpirun with proper slot allocation
+
+Variables:
+  - nodes: List of dicts with 'ip', 'hostname', 'cpus' keys
+  - slots_per_node: 'max' (use all CPUs) or 'optimal' (1 per node) or int
+#}
+# MPI Hostfile
+# Auto-generated from template: templates/mpi/hostfile.j2
+# Generated: {{ generation_timestamp }}
+# Cluster: {{ cluster_name }}
+
+{% for node in nodes %}
+{% if slots_per_node == 'max' %}
+{{ node.ip }} slots={{ node.cpus }}  # {{ node.hostname }} (all cores)
+{% elif slots_per_node == 'optimal' %}
+{{ node.ip }} slots=1  # {{ node.hostname }} (1 process per node)
+{% else %}
+{{ node.ip }} slots={{ slots_per_node }}  # {{ node.hostname }}
+{% endif %}
+{% endfor %}
+
+# Total slots: {% if slots_per_node == 'max' %}{{ nodes | map(attribute='cpus') | sum }}{% elif slots_per_node == 'optimal' %}{{ nodes | length }}{% else %}{{ nodes | length * slots_per_node }}{% endif %}
+
+# Usage examples:
+# mpirun -np {{ nodes | length }} --hostfile {{ output_filename }} --map-by ppr:1:node hostname
+# mpirun -np {{ nodes | map(attribute='cpus') | sum }} --hostfile {{ output_filename }} ./my_mpi_program

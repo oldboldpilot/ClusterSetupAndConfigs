@@ -1,0 +1,88 @@
+{#
+OpenMPI MCA Parameters Configuration Template
+Generates ~/.openmpi/mca-params.conf for each cluster node
+
+Variables:
+  - cluster_subnet: Network subnet for cluster (e.g., "192.168.1.0/24")
+  - cluster_ips: List of cluster node IPs
+  - openmpi_version: OpenMPI version (e.g., "5.0.8")
+  - homebrew_prefix: Homebrew installation prefix
+  - btl_port_min: Minimum BTL TCP port
+  - oob_port_range: OOB TCP port range
+  - enable_debug: Enable verbose debugging (optional)
+#}
+# OpenMPI MCA Parameters
+# Auto-generated from template: templates/mpi/mca-params.conf.j2
+# Generated: {{ generation_timestamp }}
+# Cluster: {{ cluster_name }}
+
+# =============================================================================
+# BTL (Byte Transfer Layer) Configuration
+# =============================================================================
+# Disable InfiniBand (not available in this cluster)
+btl = ^openib
+
+# Network Interface Selection
+# Use exact IPs with /32 CIDR to avoid multi-homed node issues
+# Cluster nodes: {{ cluster_ips | join(', ') }}
+{% if use_exact_ips %}
+btl_tcp_if_include = {{ cluster_ips_cidr }}
+oob_tcp_if_include = {{ cluster_ips_cidr }}
+{% else %}
+btl_tcp_if_include = {{ cluster_subnet }}
+oob_tcp_if_include = {{ cluster_subnet }}
+{% endif %}
+
+# =============================================================================
+# OpenMPI Installation Paths
+# =============================================================================
+# Critical for finding prted daemon on remote nodes
+orte_prefix = {{ homebrew_prefix }}/Cellar/open-mpi/{{ openmpi_version }}
+opal_prefix = {{ homebrew_prefix }}
+
+# =============================================================================
+# Port Configuration (Firewall-Friendly)
+# =============================================================================
+# BTL TCP ports for MPI data transfer
+btl_tcp_port_min_v4 = {{ btl_port_min }}
+
+# OOB TCP ports for PRRTE daemon communication
+oob_tcp_port_range = {{ oob_port_range }}
+
+{% if enable_debug %}
+# =============================================================================
+# Debug Options (ENABLED)
+# =============================================================================
+btl_base_verbose = 10
+oob_base_verbose = 10
+pml_base_verbose = 10
+{% else %}
+# =============================================================================
+# Debug Options (disabled)
+# =============================================================================
+# Uncomment for troubleshooting:
+# btl_base_verbose = 10
+# oob_base_verbose = 10
+# pml_base_verbose = 10
+{% endif %}
+
+# =============================================================================
+# Additional Tuning Parameters
+# =============================================================================
+# Shared memory optimization for on-node communication
+btl_sm_use_knem = 0
+
+# TCP optimization
+btl_tcp_eager_limit = 65536
+btl_tcp_max_send_size = 131072
+
+# Connection management
+btl_tcp_endpoint_timeout = 60
+
+# =============================================================================
+# Notes
+# =============================================================================
+# - This configuration ensures MPI only uses the {{ cluster_subnet }} network
+# - All virtual interfaces (Docker, libvirt, WSL) are automatically ignored
+# - Ports {{ btl_port_min }}-{{ oob_port_range.split('-')[1] }} must be open in firewall
+# - For troubleshooting, enable debug options above

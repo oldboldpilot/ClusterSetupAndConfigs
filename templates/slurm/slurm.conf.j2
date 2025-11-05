@@ -1,0 +1,136 @@
+{#
+Slurm Configuration Template (slurm.conf)
+Generates /etc/slurm/slurm.conf for cluster
+
+Variables:
+  - cluster_name: Name of the cluster
+  - master_node: Dict with 'hostname', 'ip', 'cpus', 'memory_mb' keys
+  - worker_nodes: List of dicts with same keys
+  - slurm_user: User running Slurm daemons
+  - spool_dir: Directory for Slurm state files
+  - log_dir: Directory for Slurm logs
+  - mpi_default: Default MPI implementation (pmi2, pmix, etc.)
+#}
+# Slurm Configuration File
+# Auto-generated from template: templates/slurm/slurm.conf.j2
+# Generated: {{ generation_timestamp }}
+# Cluster: {{ cluster_name }}
+
+# =============================================================================
+# Cluster Configuration
+# =============================================================================
+ClusterName={{ cluster_name }}
+SlurmctldHost={{ master_node.hostname }}({{ master_node.ip }})
+
+# =============================================================================
+# Slurm User and Directories
+# =============================================================================
+SlurmUser={{ slurm_user | default('slurm') }}
+SlurmdUser=root
+
+StateSaveLocation={{ spool_dir | default('/var/spool/slurm/ctld') }}
+SlurmdSpoolDir={{ spool_dir | default('/var/spool/slurm/d') }}
+SlurmctldLogFile={{ log_dir | default('/var/log/slurm/slurmctld.log') }}
+SlurmdLogFile={{ log_dir | default('/var/log/slurm/slurmd.log') }}
+
+# =============================================================================
+# MPI Configuration
+# =============================================================================
+MpiDefault={{ mpi_default | default('pmi2') }}
+MpiParams=ports={{ btl_port_min | default(50000) }}-{{ oob_port_max | default(50200) }}
+
+# =============================================================================
+# Process Tracking
+# =============================================================================
+ProctrackType=proctrack/cgroup
+TaskPlugin=task/cgroup
+
+# =============================================================================
+# Scheduling Configuration
+# =============================================================================
+SchedulerType=sched/backfill
+SelectType=select/cons_tres
+SelectTypeParameters=CR_Core_Memory
+
+# =============================================================================
+# Logging and Debugging
+# =============================================================================
+SlurmctldDebug=info
+SlurmdDebug=info
+DebugFlags=NO_CONF_HASH
+
+# =============================================================================
+# Timeouts and Limits
+# =============================================================================
+SlurmctldTimeout=300
+SlurmdTimeout=300
+InactiveLimit=0
+KillWait=30
+MinJobAge=300
+Waittime=0
+
+# =============================================================================
+# Node Definitions
+# =============================================================================
+# Master Node
+NodeName={{ master_node.hostname }} \
+    NodeAddr={{ master_node.ip }} \
+    CPUs={{ master_node.cpus }} \
+    RealMemory={{ master_node.memory_mb }} \
+    State=UNKNOWN
+
+# Worker Nodes
+{% for node in worker_nodes %}
+NodeName={{ node.hostname }} \
+    NodeAddr={{ node.ip }} \
+    CPUs={{ node.cpus }} \
+    RealMemory={{ node.memory_mb }} \
+    State=UNKNOWN
+
+{% endfor %}
+
+# =============================================================================
+# Partition Definitions
+# =============================================================================
+# All nodes partition (default)
+PartitionName=all \
+    Nodes={{ master_node.hostname }}{% for node in worker_nodes %},{{ node.hostname }}{% endfor %} \
+    Default=YES \
+    MaxTime=INFINITE \
+    State=UP
+
+# Compute-only partition (workers only)
+PartitionName=compute \
+    Nodes={% for node in worker_nodes %}{{ node.hostname }}{% if not loop.last %},{% endif %}{% endfor %} \
+    Default=NO \
+    MaxTime=INFINITE \
+    State=UP
+
+# Debug partition (master only, for quick tests)
+PartitionName=debug \
+    Nodes={{ master_node.hostname }} \
+    Default=NO \
+    MaxTime=01:00:00 \
+    State=UP
+
+# =============================================================================
+# Resource Limits
+# =============================================================================
+MaxJobCount=10000
+MaxArraySize=1000
+MaxStepCount=40000
+
+# =============================================================================
+# Accounting
+# =============================================================================
+AccountingStorageType=accounting_storage/none
+JobAcctGatherType=jobacct_gather/linux
+JobAcctGatherFrequency=30
+
+# =============================================================================
+# Notes
+# =============================================================================
+# Total cluster resources:
+#   CPUs: {{ master_node.cpus + (worker_nodes | map(attribute='cpus') | sum) }}
+#   Memory: {{ (master_node.memory_mb + (worker_nodes | map(attribute='memory_mb') | sum)) // 1024 }} GB
+#   Nodes: {{ 1 + worker_nodes | length }}

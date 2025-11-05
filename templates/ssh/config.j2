@@ -1,0 +1,45 @@
+{#
+SSH Config Template for Cluster Nodes
+Generates ~/.ssh/config for passwordless SSH with optimizations
+
+Variables:
+  - nodes: List of dicts with 'ip', 'hostname', 'username' keys
+  - ssh_key_path: Path to SSH private key
+  - connection_timeout: SSH connection timeout in seconds
+#}
+# SSH Configuration for HPC Cluster
+# Auto-generated from template: templates/ssh/config.j2
+# Generated: {{ generation_timestamp }}
+
+# Global SSH Options
+Host *
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+    TCPKeepAlive yes
+    Compression yes
+    ConnectTimeout {{ connection_timeout | default(10) }}
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    LogLevel ERROR
+
+{% for node in nodes %}
+# {{ node.hostname }}
+Host {{ node.hostname }} {{ node.ip }}
+    HostName {{ node.ip }}
+    User {{ node.username }}
+    {% if ssh_key_path %}
+    IdentityFile {{ ssh_key_path }}
+    {% endif %}
+    ForwardX11 no
+    ForwardAgent yes
+    ControlMaster auto
+    ControlPath ~/.ssh/control-%r@%h:%p
+    ControlPersist 10m
+
+{% endfor %}
+
+# Connection Multiplexing Notes:
+# - ControlMaster enables SSH connection reuse
+# - ControlPersist keeps connection alive for 10 minutes
+# - Significantly speeds up repeated SSH connections
+# - First connection creates master, subsequent connections reuse it
