@@ -23,6 +23,16 @@ This project underwent a **massive 84% code reduction** (2,951 lines → 474 lin
 ## Project Evolution (Key Commits)
 
 ### Recent Major Changes (Nov 2025)
+- **a5aa3cc**: Updated test results with Slurm job submission completion
+- **bb775c1**: Added 647-line comprehensive Slurm job submission guide
+- **b2d90ee**: MAJOR - Complete Slurm job submission system (2,378 lines)
+  * SlurmJobManager class for MPI/OpenMP/UPC++/OpenSHMEM/Hybrid jobs
+  * SlurmSetupHelper for Munge authentication and cluster setup
+  * 5 Jinja2 job templates with automatic resource allocation
+  * setup_slurm.py and test_slurm_jobs.py utilities
+  * Reads cluster config, auto-detects 168 cores across 5 nodes
+- **73cac25**: Fixed UPC++ 2025.10.0 API compatibility and OpenSHMEM linker
+- **5f1bab3**: Added comprehensive AI agent documentation (v2.0.0 builder agent)
 - **1ab2326**: Comprehensive test results for directory consolidation
 - **1b6bad5**: Added cluster cleanup module to kill orphaned processes
 - **99ae6fc**: Consolidated all directories under `cluster_build_sources`
@@ -67,7 +77,11 @@ ClusterSetupAndConfigs/
 │   ├── # Parallel Programming
 │   ├── mpi_manager.py           # OpenMPI 5.0.8 installation
 │   ├── openmp_manager.py        # OpenMP (libomp) installation
-│   ├── slurm_manager.py         # Slurm workload manager
+│   ├── slurm_manager.py         # Slurm workload manager installation
+│   │
+│   ├── # Slurm Job Submission (NEW Nov 5, 2025)
+│   ├── slurm_job_manager.py     # Job generation & submission (563 lines)
+│   ├── slurm_setup_helper.py    # Munge authentication setup (359 lines)
 │   │
 │   ├── # PGAS Libraries
 │   ├── pgas_manager.py          # Unified PGAS installer (NEW v3.0)
@@ -87,7 +101,13 @@ ClusterSetupAndConfigs/
 │   └── templates/               # Jinja2 templates
 │       ├── benchmarks/          # UPC++, MPI, OpenSHMEM, Berkeley UPC
 │       ├── build/               # Makefiles, run scripts
-│       └── configs/             # MPI MCA, hostfiles, Slurm configs
+│       ├── configs/             # MPI MCA, hostfiles, Slurm configs
+│       └── slurm_jobs/          # Slurm job templates (NEW Nov 5)
+│           ├── mpi_job.sh.j2
+│           ├── openmp_job.sh.j2
+│           ├── hybrid_job.sh.j2
+│           ├── upcxx_job.sh.j2
+│           └── openshmem_job.sh.j2
 │
 ├── templates/                   # System configuration templates
 │   ├── mpi/                     # MPI configuration (mca-params.conf, hostfiles)
@@ -195,6 +215,29 @@ ClusterSetupAndConfigs/
 - Cleans up stale lock files
 - Runs automatically before each setup
 - Prevents port conflicts and process zombies
+
+#### 13. **SlurmJobManager** (slurm_job_manager.py) - **NEW Nov 5, 2025**
+- Template-based Slurm job script generation using Jinja2
+- Supports 5 parallel programming frameworks:
+  * MPI (OpenMPI 5.0.8 with srun --mpi=pmix)
+  * OpenMP (thread-level on single node)
+  * Hybrid MPI+OpenMP (combined parallelism)
+  * UPC++ (PGAS with GASNet-EX)
+  * OpenSHMEM (symmetric memory)
+- Automatic resource allocation from cluster_config_actual.yaml
+- Job lifecycle: submit, monitor, cancel, retrieve output
+- Detects 168 cores across 5 nodes
+- Generated jobs: `~/cluster_build_sources/slurm_jobs/`
+- Results: `~/cluster_build_sources/slurm_results/`
+
+#### 14. **SlurmSetupHelper** (slurm_setup_helper.py) - **NEW Nov 5, 2025**
+- Munge authentication key generation (1024-byte random)
+- Munge key distribution to all worker nodes
+- Multi-OS support (Ubuntu, Debian, Red Hat, CentOS, Fedora)
+- Munge service configuration and startup
+- Slurm partition configuration
+- Service restart orchestration
+- Cluster verification (munge, sinfo tests)
 
 ## Setup Flow (9 Steps)
 
@@ -879,6 +922,7 @@ dev-dependencies = [
 
 ---
 
-**Last Updated:** November 4, 2025
+**Last Updated:** November 5, 2025
+**Latest Feature:** Comprehensive Slurm job submission system (commits b2d90ee, bb775c1, a5aa3cc)
 **For Latest Updates:** Check git log and CLAUDE.md
 **Questions?** Reference docs/ folder or ask user for clarification

@@ -599,9 +599,126 @@ echo ""
 echo "✓ Local node verification complete"
 ```
 
+### Step 1.10: Configure Slurm Job Submission (NEW - Nov 5, 2025)
+
+After Phase 1 completes, set up the Slurm job submission system for parallel programming jobs.
+
+```bash
+cd ~/cluster_build_sources/config/ClusterSetupAndConfigs
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+
+# Setup Munge authentication and Slurm
+uv run python setup_slurm.py --config cluster_config_actual.yaml --password
+```
+
+**What this does:**
+1. **Munge Authentication Setup**
+   - Generates `/etc/munge/munge.key` (1024-byte random key)
+   - Sets permissions: `munge:munge`, mode `0400`
+   - Starts `munge` service on master
+   - Distributes key to all worker nodes (with --password flag)
+
+2. **Slurm Partition Configuration**
+   - Verifies/creates default partition
+   - Restarts `slurmctld` to apply changes
+
+3. **Service Restart**
+   - Restarts `slurmctld` on master
+   - Restarts `slurmd` on all nodes
+
+4. **Verification**
+   - Tests Munge: `munge -n | unmunge`
+   - Tests Slurm: `sinfo`
+
+**Expected output:**
+```
+✓ Munge key generated
+✓ Munge service is running
+✓ Munge key distributed to workers
+✓ Slurm cluster operational
+
+Cluster Status:
+PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
+all*         up   infinite      5   idle node1,node2,node3,node4,node5
+```
+
+**Verify setup:**
+```bash
+# Check Munge
+munge -n | unmunge
+# Should output: STATUS:Success, ENCODE_HOST:..., DECODE_TIME:...
+
+# Check Slurm cluster
+sinfo
+# Should show all nodes in "idle" state
+
+# Test job submission
+uv run python test_slurm_jobs.py
+```
+
+**Troubleshooting:**
+
+If nodes show as DOWN/UNKNOWN:
+```bash
+# Check slurmd on workers
+pdsh -w 192.168.1.[139,96,48,147] 'sudo systemctl status slurmd'
+
+# Restart slurmd
+pdsh -w 192.168.1.[139,96,48,147] 'sudo systemctl restart slurmd'
+
+# Update node state
+sudo scontrol update nodename=worker1 state=idle
+```
+
+If Munge fails:
+```bash
+# Check Munge service
+sudo systemctl status munge
+
+# Fix permissions
+sudo chown -R munge:munge /etc/munge
+sudo chmod 400 /etc/munge/munge.key
+
+# Restart
+sudo systemctl restart munge
+```
+
+**Slurm Job Submission System:**
+
+Once setup is complete, you can submit jobs using the SlurmJobManager:
+
+```python
+from cluster_modules.slurm_job_manager import SlurmJobManager
+from pathlib import Path
+
+job_mgr = SlurmJobManager(config_path=Path("cluster_config_actual.yaml"))
+
+# Submit MPI job
+job_script = job_mgr.generate_mpi_job(
+    job_name="mpi_test",
+    executable="~/cluster_build_sources/benchmarks/bin/mpi_latency",
+    num_tasks=16,
+    time_limit="02:00:00"
+)
+job_id = job_mgr.submit_job(job_script)
+
+# Monitor job
+success, state = job_mgr.wait_for_job(job_id, timeout=3600)
+stdout, stderr = job_mgr.get_job_output(job_id, "mpi_test")
+```
+
+**Supported job types:**
+- MPI (OpenMPI 5.0.8)
+- OpenMP (thread-level parallelism)
+- Hybrid MPI+OpenMP
+- UPC++ (PGAS with GASNet-EX)
+- OpenSHMEM (symmetric memory)
+
+**Documentation:** `docs/guides/SLURM_JOB_SUBMISSION.md`
+
 ---
 
-## Phase 2: Cluster Distribution (Automatic)
+## Phase 2: Cluster Distribution(Automatic)
 
 **Note:** If `--password` flag was used in Step 1.2, cluster-wide setup happens **automatically**. This phase is for manual distribution if needed.
 
@@ -1668,11 +1785,12 @@ cp cluster_config_actual.yaml ~/cluster_config_backup_$(date +%Y%m%d_%H%M%S).yam
 
 **End of Builder Agent Instructions**
 
-**Version:** 2.0.0
-**Last Updated:** November 5, 2025
+**Version:** 2.1.0
+**Last Updated:** November 5, 2025 (Slurm Job Submission Update)
 **Compatible with:** ClusterSetupAndConfigs v3.0.0+
 **AI Agents Supported:** Claude, GitHub Copilot, any agent with bash execution capability
 **Total Commits Analyzed:** 60+ (from October 2024 - November 2025)
+**Latest Feature:** Complete Slurm job submission system for MPI/OpenMP/UPC++/OpenSHMEM/Hybrid jobs
 
 **Note to AI Agents:** These instructions are designed for full autonomous execution. User intervention should only be required for:
 1. Providing cluster IP addresses and credentials
