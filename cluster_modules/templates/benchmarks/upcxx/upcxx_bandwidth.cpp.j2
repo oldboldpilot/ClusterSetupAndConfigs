@@ -44,8 +44,11 @@ auto measure_bandwidth(int iterations = {{ iterations }}) -> void {
         cout << endl;
         
         for (size_t size : sizes) {
-            // Allocate source and destination buffers
+            // Allocate source buffer on rank 0
             upcxx::global_ptr<char> src_buf = upcxx::new_array<char>(size);
+            
+            // Broadcast destination pointer from rank 1
+            upcxx::global_ptr<char> dst_buf = upcxx::broadcast(upcxx::global_ptr<char>{}, 1).wait();
             
             vector<double> bandwidths;
             
@@ -53,8 +56,8 @@ auto measure_bandwidth(int iterations = {{ iterations }}) -> void {
             for (int i = 0; i < iterations; i++) {
                 auto start = high_resolution_clock::now();
                 
-                // Copy data from rank 0 to rank 1
-                upcxx::rput(src_buf.local(), upcxx::global_ptr<char>(1, src_buf.where() == 1 ? src_buf.local() : nullptr), size).wait();
+                // Copy data from rank 0 to rank 1 using rput
+                upcxx::rput(src_buf.local(), dst_buf, size).wait();
                 
                 auto end = high_resolution_clock::now();
                 
@@ -80,16 +83,21 @@ auto measure_bandwidth(int iterations = {{ iterations }}) -> void {
             upcxx::delete_array(src_buf);
         }
     } else if (rank == 1) {
-        // Rank 1 allocates receive buffers
+        // Rank 1 allocates receive buffers and broadcasts pointers
         for (size_t size : sizes) {
             upcxx::global_ptr<char> dst_buf = upcxx::new_array<char>(size);
             
-            for (int i = 0; i < iterations; i++) {
-                upcxx::barrier();
-            }
+            // Broadcast destination pointer to rank 0
+            upcxx::broadcast(dst_buf, 1).wait();
+            
+            // Wait for rank 0 to complete measurements
+            upcxx::barrier();
             
             upcxx::delete_array(dst_buf);
         }
+    } else {
+        // Other ranks just participate in barriers
+        upcxx::barrier();
     }
     
     upcxx::barrier();

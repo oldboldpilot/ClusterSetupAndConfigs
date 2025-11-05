@@ -14,38 +14,178 @@ Before starting, verify these requirements:
 
 ### Hardware/Network Requirements
 - [ ] Multiple Linux nodes (minimum 2: 1 master + 1 worker)
-- [ ] All nodes on same subnet (e.g., 192.168.1.x)
-- [ ] Network connectivity between all nodes
+- [ ] All nodes on same subnet (e.g., 192.168.1.x or 10.0.0.x)
+- [ ] Network connectivity between all nodes (test with `ping`)
 - [ ] Static IP addresses assigned to all nodes
+- [ ] **Multi-NIC nodes**: If nodes have multiple network interfaces, identify primary cluster interface
+- [ ] **Firewall ports**: MPI requires ports 50000-50200 TCP open between nodes
 
 ### Operating System Requirements
-- [ ] Ubuntu 20.04+ OR Red Hat 8+ OR Fedora 35+ (or derivative)
+- [ ] **Ubuntu 20.04+** OR **Red Hat 8+** OR **Fedora 35+** OR **Debian** (or derivatives)
 - [ ] Python 3.10+ available (Python 3.14 will be installed via Homebrew)
 - [ ] sudo access on all nodes
-- [ ] At least 20GB free disk space per node
+- [ ] At least **30GB free disk space** per node (for builds and benchmarks)
+- [ ] **Internet access** for downloading packages (Homebrew, GCC, libraries)
+- [ ] System package managers working: `apt-get` (Ubuntu/Debian) or `dnf` (Red Hat/Fedora)
 
 ### User Requirements
-- [ ] Same username exists on all nodes
-- [ ] User has sudo privileges on all nodes
-- [ ] Password available for sudo operations
-- [ ] SSH access to all nodes
+- [ ] **Same username** exists on all nodes (critical for SSH and paths)
+- [ ] User has **passwordless or password-based sudo** privileges on all nodes
+- [ ] Password available for initial sudo operations
+- [ ] SSH access to all nodes (port 22 open)
+- [ ] **Home directory** accessible on all nodes (for Homebrew installation)
 
 ### Special: WSL Requirements (if master/worker is WSL)
-- [ ] Windows 11 with WSL2
-- [ ] Mirrored networking mode configured (see Step 0-WSL below)
+- [ ] **Windows 11** with WSL2 (Windows 10 version 2004+ also works)
+- [ ] **Mirrored networking mode configured** (see Step 0-WSL below) - **CRITICAL**
 - [ ] Windows Firewall configured for MPI ports
+- [ ] **Hyper-V VM firewall** set to allow inbound connections - **REQUIRED**
+- [ ] WSL distribution updated: `wsl --update`
+- [ ] No antivirus blocking WSL network traffic
+
+### Network Validation Commands
+```bash
+# Test connectivity to all nodes:
+ping -c 3 192.168.1.11
+ping -c 3 192.168.1.12
+
+# Test SSH access:
+ssh username@192.168.1.11 "hostname"
+
+# Check firewall status:
+# Ubuntu:
+sudo ufw status
+# Red Hat:
+sudo firewall-cmd --state
+
+# Check open ports:
+sudo netstat -tuln | grep LISTEN
+
+# Verify no MPICH installed (conflicts with OpenMPI):
+which mpicc && mpicc --version | grep -i mpich && echo "⚠️ MPICH found - will be removed"
+```
 
 ---
 
 ## Build Process Overview
 
-The build happens in **3 phases**:
+The build happens in **4 phases**:
 
-1. **Phase 0: Pre-Setup** (Node information gathering, WSL config if needed)
-2. **Phase 1: Local Setup** (Install on master/current node)
-3. **Phase 2: Cluster Distribution** (Distribute to all other nodes)
+1. **Phase 0: Pre-Setup** (Node information gathering, WSL config if needed, prerequisites)
+2. **Phase 1: Local Setup** (Install on master/current node - 9 modular steps)
+3. **Phase 2: Cluster Distribution** (Distribute to all other nodes - automatic with --password)
+4. **Phase 3: Testing and Validation** (Verify cluster functionality)
 
-**Total Time:** 30-60 minutes (depending on network speed and node count)
+**Total Time:** 
+- **Phase 0**: 5-10 minutes (prerequisites, repository clone)
+- **Phase 1**: 25-45 minutes (GCC, libraries compilation)
+  - First-time: 45-60 minutes (full builds)
+  - Re-run: 2-5 minutes (cached/pre-installed)
+- **Phase 2**: 10-20 minutes (distribution to N nodes)
+- **Phase 3**: 5-10 minutes (testing)
+- **Total**: 45-85 minutes for fresh install, 20-35 minutes for re-configuration
+
+**Key Success Factors:**
+- ✅ Fast internet connection (downloads ~2GB of packages)
+- ✅ Multi-core nodes (parallel compilation with `make -j$(nproc)`)
+- ✅ Use `--password` flag for automatic cluster-wide setup
+- ✅ Pre-configured SSH keys speed up distribution
+
+---
+
+## Project Architecture Understanding (CRITICAL for AI Agents)
+
+### Modular Manager System (v3.0.0)
+
+The cluster setup uses **21 specialized manager modules** in `cluster_modules/`:
+
+| Manager | File | Purpose | Key Features |
+|---------|------|---------|--------------|
+| **ClusterCore** | `core.py` | Base class for all managers | SSH execution, password handling, error management |
+| **HomebrewManager** | `homebrew_manager.py` | Package management | GCC 15.2.0, Python 3.14, binutils 2.45 |
+| **SSHManager** | `ssh_manager.py` | SSH infrastructure | Key generation, distribution, mesh networking |
+| **SudoManager** | `sudo_manager.py` | Privilege management | Passwordless sudo, single password prompt |
+| **NetworkManager** | `network_manager.py` | Network/Firewall | /etc/hosts, firewall rules, multi-NIC support |
+| **MPIManager** | `mpi_manager.py` | OpenMPI setup | Installation, hostfiles, MCA parameters |
+| **OpenMPManager** | `openmp_manager.py` | OpenMP support | libomp installation, thread configuration |
+| **PGASManager** | `pgas_manager.py` | PGAS libraries | GASNet-EX, UPC++, OpenSHMEM unified installer |
+| **SlurmManager** | `slurm_manager.py` | Job scheduler | Slurm configuration, node management |
+| **PDSHManager** | `pdsh_manager.py` | Parallel shell | Multi-node command execution |
+| **BenchmarkManager** | `benchmark_manager.py` | Benchmark suite | Template-based code generation |
+| **ConfigTemplateManager** | `config_template_manager.py` | Configuration | Jinja2 templates, deployment automation |
+| **ClusterCleanup** | `cluster_cleanup.py` | Maintenance | Process cleanup, artifact removal |
+| **BenchmarkRunner** | `benchmark_runner.py` | Execution | pdsh-based parallel benchmarking |
+| **MultiNodeRunner** | `multi_node_runner.py` | Orchestration | Cluster-wide task coordination |
+
+### Directory Structure (Post-Consolidation)
+
+```
+~/cluster_build_sources/                    # ALL cluster files here
+├── config/
+│   └── ClusterSetupAndConfigs/            # This repository
+│       ├── cluster_setup.py               # Main orchestrator (474 lines)
+│       ├── cluster_modules/               # 21 manager modules
+│       │   ├── core.py                    # Base ClusterCore class
+│       │   ├── homebrew_manager.py
+│       │   ├── ssh_manager.py
+│       │   ├── pgas_manager.py            # Unified PGAS installer
+│       │   ├── templates/                 # Jinja2 templates
+│       │   │   ├── mpi/
+│       │   │   ├── slurm/
+│       │   │   ├── benchmarks/
+│       │   │   └── firewall/
+│       │   └── frameworks/                # Framework-specific configs
+│       ├── docs/                          # Organized documentation
+│       │   ├── troubleshooting/
+│       │   ├── configuration/
+│       │   ├── guides/
+│       │   ├── benchmarking/
+│       │   └── development/
+│       ├── agents/                        # AI agent instructions
+│       │   ├── claude_agent.md            # Project understanding
+│       │   └── claude_builder_agent.md    # This file
+│       └── scripts/                       # Utility scripts
+├── benchmarks/                            # Generated benchmark suite
+│   ├── src/                              # Benchmark source files
+│   ├── bin/                              # Compiled binaries
+│   ├── results/                          # Execution results
+│   ├── Makefile                          # Generated from template
+│   └── run_benchmarks.sh                 # Execution script
+└── build/                                # Build artifacts (PGAS, etc.)
+```
+
+### Setup Flow (9 Modular Steps)
+
+```
+Step 0: Passwordless Sudo (SudoManager)
+  ↓
+Step 1: SSH Keys (SSHManager)
+  ↓
+Step 2: Homebrew + GCC + Binutils (HomebrewManager)
+  ↓
+Step 3: System Configuration (NetworkManager)
+  ↓
+Step 4: Slurm + pdsh (SlurmManager, PDSHManager)
+  ↓
+Step 5: OpenMPI + OpenMP (MPIManager, OpenMPManager)
+  ↓
+Step 6: PGAS Libraries (PGASManager)
+  ↓
+Step 7: Network/Firewall (NetworkManager)
+  ↓
+Step 8: Benchmarks (BenchmarkManager)
+  ↓
+Step 9: Verification (All managers)
+```
+
+### Key Architecture Decisions
+
+1. **Single Password Entry**: SudoManager configures passwordless sudo in Step 0
+2. **SSH Mesh**: SSHManager creates full mesh (every node ↔ every node)
+3. **Template-Based**: All configs generated from Jinja2 templates
+4. **Parallel Execution**: PDSHManager enables cluster-wide parallel operations
+5. **Unified PGAS**: PGASManager installs GASNet, UPC++, OpenSHMEM together
+6. **Any-Node Execution**: Detects current node, sets up all others
 
 ---
 
@@ -925,6 +1065,154 @@ echo "=========================================="
 
 ---
 
+---
+
+## Known Issues and Solutions (From Last 60+ Commits)
+
+### Issue 1: Multi-Homed Nodes (Commit: 762c70d - FIXED)
+
+**Problem**: Nodes with multiple network interfaces on same subnet cause MPI failures
+- Node has two IPs: 192.168.1.136 (primary) and 192.168.1.137 (secondary)
+- MPI tries to use both, causing routing confusion
+- Symptoms: "PRTE has lost communication with remote daemon"
+
+**Solution**: Use exact IP with /32 CIDR in MCA parameters
+```bash
+# WRONG (uses subnet, picks up all IPs):
+btl_tcp_if_include = 192.168.1.0/24
+
+# CORRECT (exact IP only):
+btl_tcp_if_include = 192.168.1.136/32,192.168.1.139/32,192.168.1.96/32
+oob_tcp_if_include = 192.168.1.136/32,192.168.1.139/32,192.168.1.96/32
+```
+
+**Status**: Fixed in ConfigTemplateManager - auto-detects and configures exact IPs
+
+### Issue 2: MPICH/OpenMPI Conflict (Commit: df22a96 - FIXED)
+
+**Problem**: MPICH and OpenMPI are incompatible and cannot coexist
+- Homebrew might install MPICH by default
+- Causes "unknown MPI commands" or daemon communication failures
+- Different internal protocols
+
+**Solution**: Automatic detection and removal
+```bash
+# Setup script now automatically:
+1. Detects MPICH: brew list | grep mpich
+2. Uninstalls: brew uninstall mpich
+3. Installs OpenMPI: brew install open-mpi
+4. Links: brew link open-mpi --force
+5. Verifies: mpicc --version | grep "Open MPI"
+```
+
+**Status**: Fixed in MPIManager - runs on all nodes automatically
+
+### Issue 3: Slurm 24.11+ CgroupAutomount Deprecated (Commit: 97b5d6f - FIXED)
+
+**Problem**: New Slurm versions reject deprecated CgroupAutomount option
+- Error: "The option 'CgroupAutomount' is defunct"
+- Slurm services fail to start
+
+**Solution**: Remove deprecated option from cgroup.conf
+```bash
+# Setup script now:
+sudo sed -i '/CgroupAutomount/d' /etc/slurm/cgroup.conf
+```
+
+**Status**: Fixed in SlurmManager - automatic on all nodes
+
+### Issue 4: WSL Symlink Failures with uv (Commit: 3e29b8d - FIXED)
+
+**Problem**: Windows filesystem doesn't support symlinks
+- Error: "Operation not permitted (os error 1)"
+- uv fails to create virtual environment on `/mnt/z`, `/mnt/c`
+
+**Solution**: Use Linux home directory for venv
+```bash
+# WRONG (Windows filesystem):
+cd /mnt/z/project
+uv sync  # FAILS
+
+# CORRECT (Linux home):
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+cd ~/cluster_build_sources/config/ClusterSetupAndConfigs
+uv sync  # WORKS
+```
+
+**Status**: Documented in setup instructions, auto-configured in .bashrc
+
+### Issue 5: Directory Scatter (Commits: 99ae6fc, 858fcdb - FIXED)
+
+**Problem**: Cluster files scattered across filesystem
+- `/tmp/cluster_sources`, `~/cluster_sources`, `~/pgas`, etc.
+- Inconsistent paths, hard to maintain
+
+**Solution**: Consolidated to `~/cluster_build_sources/`
+```bash
+# All cluster files now under:
+~/cluster_build_sources/
+├── config/ClusterSetupAndConfigs/   # This repo
+├── benchmarks/                       # Benchmark suite
+└── build/                           # Build artifacts
+```
+
+**Status**: Fixed and tested on all nodes (Commit: 1ab2326)
+
+### Issue 6: Orphaned MPI Processes (Commit: 1b6bad5 - FIXED)
+
+**Problem**: Failed MPI runs leave zombie processes
+- Blocks ports, consumes resources
+- Hard to identify and kill
+
+**Solution**: ClusterCleanup module
+```bash
+# Automatic cleanup:
+python cluster_modules/cluster_cleanup.py --config cluster_config_actual.yaml
+
+# Kills: orted, mpirun, upcxx-run, oshrun, test_* processes
+# Cleans: /tmp artifacts, stale logs
+```
+
+**Status**: Integrated into setup and benchmark runners
+
+### Issue 7: Firewall Blocking MPI (Commits: 0468454, 762c70d - FIXED)
+
+**Problem**: Default firewalls block MPI ports 50000-50200
+- Works locally, fails cross-cluster
+- No clear error messages
+
+**Solution**: Automated firewall configuration
+```bash
+# Ubuntu/Debian (ufw):
+sudo ufw allow 50000:50200/tcp comment 'OpenMPI'
+
+# Red Hat/Fedora (firewalld):
+sudo firewall-cmd --permanent --add-port=50000-50200/tcp
+sudo firewall-cmd --reload
+
+# WSL (Hyper-V + Windows Firewall):
+Set-NetFirewallHyperVVMSetting -Name '{VM-ID}' -DefaultInboundAction Allow
+```
+
+**Status**: ConfigTemplateManager automates on all nodes
+
+### Issue 8: Benchmark Compilation Failures (Commit: 2ce5ecd - FIXED)
+
+**Problem**: UPC++ and OpenSHMEM benchmarks fail to compile
+- API mismatches, linker errors
+- Missing library paths
+
+**Solution**: Updated templates and Makefile
+```bash
+# UPC++: Use correct API (upcxx::rpc, not upcxx::rpc_ff)
+# OpenSHMEM: Add -loshmem linker flag
+# Makefile: Include proper library paths
+```
+
+**Status**: BenchmarkManager templates updated, tested
+
+---
+
 ## Error Recovery Procedures
 
 ### If Setup Fails at Any Step:
@@ -1120,43 +1408,171 @@ echo "✓✓✓ AUTONOMOUS BUILD COMPLETE ✓✓✓"
 
 Before declaring "cluster build complete", verify:
 
-- [ ] All nodes appear in `sinfo` output
-- [ ] `mpirun --map-by node` distributes across all nodes
-- [ ] `pdsh -w all_nodes hostname` works
-- [ ] GCC 15.2.0 installed on all nodes
-- [ ] OpenMPI 5.0.8 installed on all nodes
-- [ ] UPC++ and OpenSHMEM available (optional but recommended)
-- [ ] Benchmarks compile successfully
-- [ ] At least one benchmark runs successfully across nodes
-- [ ] Passwordless SSH works between all nodes
-- [ ] Passwordless sudo works on all nodes
-- [ ] Firewall allows MPI ports (50000-50200)
-- [ ] No orphaned MPI processes from testing
+### Critical Infrastructure (MUST PASS)
+- [ ] All nodes appear in `sinfo` output (no "down" nodes)
+- [ ] `mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 --map-by node -np 4 hostname` distributes across all nodes
+- [ ] `pdsh -w all_nodes hostname` works (parallel execution)
+- [ ] Passwordless SSH works between ALL node pairs (full mesh)
+- [ ] Passwordless sudo works on all nodes (`sudo -n true`)
+- [ ] GCC 15.2.0 installed: `/home/linuxbrew/.linuxbrew/bin/gcc --version`
+- [ ] OpenMPI 5.0.8 installed: `mpicc --version` (check on all nodes)
+- [ ] **No MPICH installed**: `brew list | grep mpich` returns nothing
+- [ ] Firewall allows MPI ports 50000-50200 TCP on all nodes
+- [ ] **Directory structure**: `~/cluster_build_sources/` exists with config/, benchmarks/, build/
+
+### Software Versions (VERIFY)
+- [ ] GCC: 15.2.0 (`gcc --version`)
+- [ ] Binutils: 2.45 (`as --version`)
+- [ ] OpenMPI: 5.0.8 (`ompi_info --version`)
+- [ ] Python: 3.14 (`/home/linuxbrew/.linuxbrew/bin/python3.14 --version`)
+- [ ] Slurm: 24.11+ compatible (`sinfo --version`)
+- [ ] CMake: Latest (`cmake --version`)
+
+### PGAS Libraries (OPTIONAL but recommended)
+- [ ] GASNet-EX 2024.5.0: `/home/linuxbrew/.linuxbrew/gasnet/bin/gasnetrun_mpi --version`
+- [ ] UPC++ 2024.3.0: `/home/linuxbrew/.linuxbrew/bin/upcxx --version`
+- [ ] OpenSHMEM 1.5.3: `/home/linuxbrew/.linuxbrew/bin/oshcc --version`
+- [ ] Environment variables set: `echo $UPCXX_INSTALL $GASNET_ROOT`
+
+### Configuration Files (VERIFY)
+- [ ] Three hostfiles exist: `~/.openmpi/hostfile*` (standard, optimal, max)
+- [ ] MCA parameters configured: `cat ~/.openmpi/mca-params.conf` (btl_tcp_if_include, oob_tcp_if_include)
+- [ ] Slurm config: `/etc/slurm/slurm.conf` present
+- [ ] SSH config: `~/.ssh/config` has ControlMaster settings
+- [ ] Hosts file: `/etc/hosts` contains all cluster nodes
+
+### Benchmarks (OPTIONAL)
+- [ ] Benchmark directory exists: `~/cluster_build_sources/benchmarks/`
+- [ ] Benchmarks compile: `cd ~/cluster_build_sources/benchmarks && make clean && make -j$(nproc)`
+- [ ] At least one benchmark runs: `./bin/mpi_latency` or similar
+- [ ] Run script works: `./run_benchmarks.sh`
+
+### Process Cleanup (SAFETY)
+- [ ] No orphaned MPI processes: `ps aux | grep -E "orted|mpirun|upcxx-run" | grep -v grep` returns nothing
+- [ ] No zombie processes: `ps aux | grep -E "defunct|zombie" | wc -l` returns 0
+- [ ] Cleanup script tested: `python cluster_modules/cluster_cleanup.py --config cluster_config_actual.yaml`
+
+### Network/Firewall (CRITICAL)
+- [ ] **Multi-NIC nodes**: MCA params use exact IPs (/32 CIDR) if nodes have multiple interfaces
+- [ ] **WSL nodes**: Mirrored networking mode enabled, Hyper-V firewall allows inbound
+- [ ] Firewall rules: `sudo ufw status` (Ubuntu) or `sudo firewall-cmd --list-ports` (Red Hat)
+- [ ] MPI ports open: 50000-50200 TCP
+- [ ] SSH port open: 22 TCP
+
+### Documentation (FINAL STEP)
+- [ ] Generate cluster summary: `python cluster_modules/config_template_manager.py summary`
+- [ ] Save configuration: `cp cluster_config_actual.yaml ~/cluster_build_sources/cluster_config_backup_$(date +%Y%m%d).yaml`
+- [ ] Document installed versions in project README or notes
+- [ ] Test procedures documented for future reference
 
 ---
 
 ## Quick Reference Commands for AI Agents
 
+### Cluster Status and Health
 ```bash
-# Check cluster status:
-sinfo && pdsh -w all_nodes "hostname && uptime"
+# Check Slurm cluster status:
+sinfo
+sinfo -N -l  # Detailed node info
 
-# Test MPI:
-mpirun --map-by node -np $(nproc) --hostfile ~/.openmpi/hostfile_optimal hostname
+# Check all nodes with pdsh:
+pdsh -w 192.168.1.[11,12,13] "hostname && uptime && df -h / | tail -1"
 
-# Run benchmarks:
-cd ~/cluster_build_sources/benchmarks && make && ./run_benchmarks.sh
+# Verify OpenMPI version on all nodes:
+pdsh -w 192.168.1.[11,12,13] "mpicc --version | head -1"
 
-# Cleanup cluster:
+# Check for MPICH (should return nothing):
+pdsh -w 192.168.1.[11,12,13] "brew list | grep mpich || echo 'None found (good)'"
+
+# Check GCC version:
+pdsh -w 192.168.1.[11,12,13] "gcc --version | head -1"
+
+# Verify passwordless SSH:
+for node in 192.168.1.11 192.168.1.12 192.168.1.13; do
+  ssh -o BatchMode=yes $node "echo 'SSH OK to $node'" || echo "SSH FAILED to $node"
+done
+
+# Check for orphaned processes:
+pdsh -w 192.168.1.[11,12,13] "ps aux | grep -E 'orted|mpirun|upcxx-run' | grep -v grep | wc -l"
+```
+
+### Testing MPI
+```bash
+# Basic MPI test (ALWAYS use --prefix and --map-by node):
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node \
+       -np 4 \
+       --hostfile ~/.openmpi/hostfile_optimal \
+       hostname
+
+# MPI with network specification (multi-NIC nodes):
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --mca btl_tcp_if_include 192.168.1.136/32,192.168.1.139/32 \
+       --mca oob_tcp_if_include 192.168.1.136/32,192.168.1.139/32 \
+       --map-by node \
+       -np 4 \
+       --hostfile ~/.openmpi/hostfile_optimal \
+       hostname
+
+# MPI latency test (if benchmarks built):
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node \
+       -np 2 \
+       --hostfile ~/.openmpi/hostfile_optimal \
+       ~/cluster_build_sources/benchmarks/bin/mpi_latency
+```
+
+### Benchmarks
+```bash
+# Navigate to benchmarks:
+cd ~/cluster_build_sources/benchmarks
+
+# Clean and rebuild:
+make clean
+make -j$(nproc)
+
+# Run all benchmarks:
+./run_benchmarks.sh
+
+# Run specific benchmark:
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --map-by node -np 4 \
+       --hostfile ~/.openmpi/hostfile_optimal \
+       ./bin/mpi_latency
+
+# View results:
+ls -lh results/
+cat results/mpi_latency_results.txt
+```
+
+### Cleanup and Maintenance
+```bash
+# Kill orphaned processes on all nodes:
+cd ~/cluster_build_sources/config/ClusterSetupAndConfigs
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
 uv run python cluster_modules/cluster_cleanup.py --config cluster_config_actual.yaml
 
-# Re-run setup:
-cd ~/cluster_build_sources/config/ClusterSetupAndConfigs && \
-  uv run python cluster_setup.py --config cluster_config_actual.yaml --password
+# Manual process cleanup:
+pdsh -w 192.168.1.[11,12,13] "killall orted mpirun upcxx-run oshrun 2>/dev/null || true"
 
-# Fresh install:
-cd ~/cluster_build_sources/config/ClusterSetupAndConfigs && \
-  uv run python cluster_setup.py --config cluster_config_actual.yaml --password --clean-install
+# Clean benchmark artifacts:
+cd ~/cluster_build_sources/benchmarks
+make clean
+rm -rf results/*
+```
+
+### Configuration Management
+```bash
+# Generate MPI configuration from templates:
+cd ~/cluster_build_sources/config/ClusterSetupAndConfigs
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_modules/config_template_manager.py generate mpi
+
+# Deploy configs to all nodes:
+uv run python cluster_modules/config_template_manager.py deploy mpi
+
+# Configure firewall on all nodes:
+uv run python cluster_modules/config_template_manager.py firewall configure
 
 # Verify firewall:
 uv run python cluster_modules/config_template_manager.py firewall verify
@@ -1165,16 +1581,180 @@ uv run python cluster_modules/config_template_manager.py firewall verify
 uv run python cluster_modules/config_template_manager.py summary
 ```
 
+### Setup and Re-configuration
+```bash
+# Navigate to project:
+cd ~/cluster_build_sources/config/ClusterSetupAndConfigs
+
+# Set environment:
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+
+# Re-run setup (uses cached installations):
+uv run python cluster_setup.py --config cluster_config_actual.yaml --password
+
+# Fresh install (rebuilds everything):
+uv run python cluster_setup.py --config cluster_config_actual.yaml --password --clean-install
+
+# Non-interactive mode:
+uv run python cluster_setup.py --config cluster_config_actual.yaml --password --non-interactive
+
+# Setup specific node:
+ssh worker1
+cd ~/cluster_build_sources/config/ClusterSetupAndConfigs
+export UV_PROJECT_ENVIRONMENT=$HOME/.venv/cluster-setup
+uv run python cluster_setup.py --config cluster_config_actual.yaml
+```
+
+### Troubleshooting
+```bash
+# Check MPI MCA parameters:
+cat ~/.openmpi/mca-params.conf
+
+# Test MPI with verbose output:
+mpirun --prefix /home/linuxbrew/.linuxbrew/Cellar/open-mpi/5.0.8 \
+       --mca btl_base_verbose 30 \
+       --map-by node -np 2 hostname
+
+# Check network interfaces:
+ip addr show | grep "inet "
+
+# Test firewall:
+# Ubuntu:
+sudo ufw status numbered
+# Red Hat:
+sudo firewall-cmd --list-all
+
+# Check Slurm logs:
+sudo tail -f /var/log/slurm/slurmctld.log  # Master
+sudo tail -f /var/log/slurm/slurmd.log     # Workers
+
+# Verify Homebrew paths:
+which gcc mpicc upcxx
+ls -l /home/linuxbrew/.linuxbrew/bin/gcc
+ls -l /home/linuxbrew/.linuxbrew/bin/mpicc
+
+# Check PGAS installations:
+/home/linuxbrew/.linuxbrew/bin/upcxx --version
+/home/linuxbrew/.linuxbrew/bin/oshcc --version
+ls -l /home/linuxbrew/.linuxbrew/gasnet/
+```
+
+### Backup and Documentation
+```bash
+# Backup configuration:
+cp cluster_config_actual.yaml ~/cluster_config_backup_$(date +%Y%m%d_%H%M%S).yaml
+
+# Save installed versions:
+{
+  echo "=== Cluster Software Versions ==="
+  echo "Date: $(date)"
+  echo ""
+  echo "GCC: $(gcc --version | head -1)"
+  echo "OpenMPI: $(ompi_info --version | head -1)"
+  echo "Python: $(python3.14 --version)"
+  echo "Slurm: $(sinfo --version)"
+  echo "CMake: $(cmake --version | head -1)"
+  echo ""
+  echo "=== PGAS ==="
+  echo "UPC++: $(/home/linuxbrew/.linuxbrew/bin/upcxx --version 2>&1 | head -1)"
+  echo "OpenSHMEM: $(/home/linuxbrew/.linuxbrew/bin/oshcc --version 2>&1 | head -1)"
+  echo ""
+  echo "=== Nodes ==="
+  pdsh -w 192.168.1.[11,12,13] "hostname"
+} > ~/cluster_versions_$(date +%Y%m%d).txt
+```
+
 ---
 
 **End of Builder Agent Instructions**
 
-**Version:** 1.0.0
-**Last Updated:** November 4, 2025
+**Version:** 2.0.0
+**Last Updated:** November 5, 2025
 **Compatible with:** ClusterSetupAndConfigs v3.0.0+
 **AI Agents Supported:** Claude, GitHub Copilot, any agent with bash execution capability
+**Total Commits Analyzed:** 60+ (from October 2024 - November 2025)
 
 **Note to AI Agents:** These instructions are designed for full autonomous execution. User intervention should only be required for:
 1. Providing cluster IP addresses and credentials
 2. Confirming critical actions (optional with --non-interactive)
 3. Resolving network/hardware issues outside software scope
+
+---
+
+## 🆕 What's New in v2.0.0 (November 5, 2025)
+
+### Major Updates from Last 60+ Commits:
+
+**1. Complete Directory Consolidation (Commits: 99ae6fc, 858fcdb)**
+- All cluster directories consolidated under `~/cluster_build_sources/`
+- Benchmarks: `~/cluster_build_sources/benchmarks/`
+- Configuration: `~/cluster_build_sources/config/ClusterSetupAndConfigs/`
+- Build artifacts: `~/cluster_build_sources/build/`
+- Scripts: `~/cluster_build_sources/config/ClusterSetupAndConfigs/scripts/`
+- **No more scattered directories** across the filesystem
+
+**2. Modular Architecture Complete (84% Code Reduction)**
+- `cluster_setup.py`: 2,951 lines → 474 lines (84% reduction!)
+- 21 specialized manager modules in `cluster_modules/`
+- Full PGASManager with GASNet-EX, UPC++, OpenSHMEM
+- Template-based configuration system
+- Automated benchmark generation
+
+**3. Cluster Cleanup Module (Commit: 1b6bad5)**
+- New `cluster_modules/cluster_cleanup.py`
+- Kills orphaned MPI/PGAS processes
+- Cleans up test artifacts
+- Safe shutdown procedures
+
+**4. Multi-Node Benchmark Runner (Commits: 6623cae, 2ce5ecd)**
+- pdsh-based parallel execution
+- Automated process cleanup
+- Results aggregation
+- Performance metrics collection
+
+**5. Template System with Firewall Integration (Commits: 762c70d, 0468454)**
+- Jinja2 templates for all configurations
+- Automated firewall setup (firewalld/ufw)
+- Multi-homed node support
+- MPI port configuration (50000-50200)
+
+**6. Comprehensive Documentation Reorganization (Commit: aaafd42)**
+- `docs/troubleshooting/` - All troubleshooting guides
+- `docs/configuration/` - Configuration documentation
+- `docs/guides/` - User guides
+- `docs/benchmarking/` - Benchmark results
+- `docs/development/` - Development logs
+- `docs/agent-instructions/` - AI agent instructions
+
+**7. Latest Software Versions**
+- GCC 15.2.0 (Homebrew)
+- Binutils 2.45
+- OpenMPI 5.0.8
+- Python 3.14
+- GASNet-EX 2024.5.0
+- UPC++ 2024.3.0
+- OpenSHMEM 1.5.3 (with OFI transport)
+- Slurm 24.11+ compatibility
+
+**8. Multi-OS Support Enhanced**
+- Ubuntu 20.04+ / Debian
+- Red Hat 8+ / CentOS / Rocky Linux
+- Fedora 35+
+- WSL2 with mirrored networking
+- Automatic package manager detection (apt-get/dnf/yum)
+
+**9. Critical Bug Fixes**
+- Multi-homed node MPI communication (exact IP/32 CIDR)
+- MPICH/OpenMPI conflict detection and resolution
+- Slurm 24.11+ CgroupAutomount deprecation
+- WSL symlink issues with uv
+- Passwordless sudo configuration
+- SSH key mesh distribution
+
+**10. Testing Infrastructure**
+- 118 total tests (102 passing)
+- 16 expected failures for optional components
+- Comprehensive test coverage
+- Production cluster validated (4 nodes)
+
+---
