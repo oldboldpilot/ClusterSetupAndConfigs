@@ -601,6 +601,14 @@ def main():
         
         print("\n✓ Clean install completed - proceeding with fresh setup\n")
     
+    # Always run cluster cleanup before setup to kill orphaned processes
+    print("\n" + "="*70)
+    print("CLUSTER CLEANUP - Killing orphaned processes")
+    print("="*70)
+    from cluster_modules.cluster_cleanup import ClusterCleanup
+    cleanup = ClusterCleanup(master, workers, username)
+    cleanup.cleanup_all_nodes()
+    
     # Run setup
     setup = ClusterSetup(master, workers, username, password)
     setup.run_full_setup(config_file=args.config, non_interactive=args.non_interactive)

@@ -17,6 +17,7 @@ from .openshmem_manager import OpenSHMEMManager
 from .berkeley_upc_manager import BerkeleyUPCManager
 from .pgas_manager import PGASManager
 from .benchmark_manager import BenchmarkManager
+from .cluster_cleanup import ClusterCleanup
 from .slurm_manager import SlurmManager
 from .network_manager import NetworkManager
 from .pdsh_manager import PDSHManager
