@@ -1,0 +1,75 @@
+{#
+MPI Configuration Template for Benchmarks
+Generates MPI-specific runtime configuration for benchmark execution
+
+Variables:
+  - cluster_nodes: List of nodes with IP and CPU count
+  - mpi_processes_per_node: Number of MPI processes per node
+  - enable_thread_multiple: Enable MPI_THREAD_MULTIPLE support
+  - use_shared_memory: Enable shared memory optimization
+  - network_interface: Network interface for MPI communication
+#}
+# MPI Benchmark Configuration
+# Auto-generated from template: templates/benchmarks/mpi/benchmark_config.j2
+# Generated: {{ generation_timestamp }}
+
+# ============================================================
+# MPI Runtime Configuration for Benchmarks
+# ============================================================
+
+# Process Placement
+export OMPI_MCA_rmaps_base_mapping_policy=node
+export OMPI_MCA_rmaps_base_oversubscribe=false
+
+{% if mpi_processes_per_node %}
+# Processes per node: {{ mpi_processes_per_node }}
+export OMPI_MCA_rmaps_base_npersocket={{ mpi_processes_per_node }}
+{% endif %}
+
+# Thread Support
+{% if enable_thread_multiple %}
+export OMPI_MCA_mpi_thread_multiple=1
+{% else %}
+export OMPI_MCA_mpi_thread_multiple=0
+{% endif %}
+
+# Network Configuration
+{% if network_interface %}
+export OMPI_MCA_btl_tcp_if_include={{ network_interface }}
+export OMPI_MCA_oob_tcp_if_include={{ network_interface }}
+{% endif %}
+
+# Shared Memory Optimization
+{% if use_shared_memory %}
+export OMPI_MCA_btl=^tcp,openib  # Use shared memory when possible
+export OMPI_MCA_btl_sm_use_knem=1
+{% endif %}
+
+# Performance Tuning for Benchmarks
+export OMPI_MCA_mpi_leave_pinned=1
+export OMPI_MCA_mpi_leave_pinned_pipeline=1
+
+# Disable Progress Threads (better for benchmarks)
+export OMPI_MCA_osc_pt2pt_no_locks=1
+
+# ============================================================
+# Cluster Node Information
+# ============================================================
+{% for node in cluster_nodes %}
+# {{ node.hostname }}: {{ node.ip }} ({{ node.cpus }} CPUs)
+{% endfor %}
+
+# ============================================================
+# Benchmark Execution Commands
+# ============================================================
+
+# Example: Run with {{ cluster_nodes|length }} nodes, 1 process per node
+# mpirun -np {{ cluster_nodes|length }} --map-by ppr:1:node ./benchmark
+
+# Example: Run with all available CPUs
+# mpirun -np {{ cluster_nodes|sum(attribute='cpus') }} ./benchmark
+
+# Example: Run latency benchmark (minimal processes)
+# mpirun -np 2 --map-by ppr:1:node ./mpi_latency
+
+# ============================================================

@@ -1,0 +1,155 @@
+{#
+Hybrid MPI+OpenMP Configuration Template for Benchmarks
+Generates configuration for hybrid parallel benchmarks
+
+Variables:
+  - cluster_nodes: List of nodes with IP and CPU count
+  - mpi_processes_per_node: Number of MPI processes per node
+  - openmp_threads_per_process: Number of OpenMP threads per MPI process
+  - thread_affinity: OpenMP thread affinity policy
+  - bind_to: MPI bind-to policy (core, socket, numa)
+#}
+# Hybrid MPI+OpenMP Benchmark Configuration
+# Auto-generated from template: templates/benchmarks/hybrid/benchmark_config.j2
+# Generated: {{ generation_timestamp }}
+
+# ============================================================
+# Hybrid MPI+OpenMP Runtime Configuration for Benchmarks
+# ============================================================
+
+# MPI Configuration
+{% if mpi_processes_per_node %}
+export OMPI_MCA_rmaps_base_npersocket={{ mpi_processes_per_node }}
+{% endif %}
+
+{% if bind_to %}
+# MPI Process Binding: {{ bind_to }}
+export OMPI_MCA_hwloc_base_binding_policy={{ bind_to }}
+{% else %}
+export OMPI_MCA_hwloc_base_binding_policy=socket
+{% endif %}
+
+# Enable thread support in MPI
+export OMPI_MCA_mpi_thread_multiple=1
+
+# OpenMP Configuration
+{% if openmp_threads_per_process %}
+export OMP_NUM_THREADS={{ openmp_threads_per_process }}
+{% else %}
+# Calculate threads per MPI process automatically
+{% if mpi_processes_per_node and cluster_nodes[0].cpus %}
+export OMP_NUM_THREADS=$(( {{ cluster_nodes[0].cpus }} / {{ mpi_processes_per_node }} ))
+{% else %}
+export OMP_NUM_THREADS=4
+{% endif %}
+{% endif %}
+
+{% if thread_affinity %}
+export OMP_PROC_BIND={{ thread_affinity }}
+{% else %}
+export OMP_PROC_BIND=close
+{% endif %}
+
+export OMP_PLACES=cores
+export OMP_WAIT_POLICY=active
+export OMP_DYNAMIC=false
+
+# Nested Parallelism (typically disabled for hybrid)
+export OMP_NESTED=false
+export OMP_MAX_ACTIVE_LEVELS=1
+
+# ============================================================
+# Hybrid Parallelism Strategy
+# ============================================================
+{% if mpi_processes_per_node and openmp_threads_per_process %}
+# Configuration:
+#   - {{ mpi_processes_per_node }} MPI processes per node
+#   - {{ openmp_threads_per_process }} OpenMP threads per process
+#   - Total: {{ mpi_processes_per_node * openmp_threads_per_process }} parallel units per node
+{% endif %}
+
+# ============================================================
+# Cluster Node Information
+# ============================================================
+{% for node in cluster_nodes %}
+# {{ node.hostname }}: {{ node.ip }} ({{ node.cpus }} CPUs)
+{% if mpi_processes_per_node %}
+#   - MPI processes: {{ mpi_processes_per_node }}
+#   - Threads/process: {{ (node.cpus / mpi_processes_per_node)|int }}
+{% endif %}
+{% endfor %}
+
+# ============================================================
+# Benchmark Execution Commands
+# ============================================================
+
+{% set total_mpi_procs = cluster_nodes|length * (mpi_processes_per_node|default(1)) %}
+
+# Example: Run with hybrid parallelism
+# mpirun -np {{ total_mpi_procs }} \
+#        --map-by socket:PE=${OMP_NUM_THREADS} \
+#        --bind-to socket \
+#        ./hybrid_benchmark
+
+# Example: Strong scaling (fixed problem size)
+# for np in 1 2 4 8; do
+#     export OMP_NUM_THREADS=$(({{ cluster_nodes[0].cpus }} / np))
+#     mpirun -np $np ./hybrid_benchmark
+# done
+
+# Example: Weak scaling (problem size grows with processes)
+# mpirun -np {{ total_mpi_procs }} ./hybrid_benchmark
+
+# Example: Pure MPI (OMP_NUM_THREADS=1)
+# export OMP_NUM_THREADS=1
+# mpirun -np {{ cluster_nodes|sum(attribute='cpus') }} ./hybrid_benchmark
+
+# Example: Pure OpenMP (single MPI process)
+# export OMP_NUM_THREADS={{ cluster_nodes[0].cpus }}
+# mpirun -np 1 ./hybrid_benchmark
+
+# ============================================================
+# Hybrid Programming Best Practices:
+# ============================================================
+# 1. Process Placement:
+#    - Place MPI processes on different sockets/NUMA domains
+#    - Keep OpenMP threads within same socket for memory locality
+#
+# 2. Thread Binding:
+#    - close:  Threads bound to adjacent cores (good for cache sharing)
+#    - spread: Threads spread across cores (good for bandwidth)
+#
+# 3. Load Balancing:
+#    - Ensure workload is balanced across MPI processes
+#    - Ensure work within each process balances across threads
+#
+# 4. Communication Strategy:
+#    - Use MPI for inter-node communication
+#    - Use OpenMP for intra-node parallelism
+#    - Minimize thread-to-thread synchronization
+#
+# 5. Memory Affinity:
+#    - First-touch policy: Memory allocated close to accessing thread
+#    - Consider NUMA effects with multiple sockets per node
+# ============================================================
+
+# ============================================================
+# Common Hybrid Configurations:
+# ============================================================
+# Dual-socket node with 16 cores/socket (32 cores total):
+#
+# Configuration A: 2 MPI × 16 OpenMP
+#   - Good for: Memory-intensive applications
+#   - export OMP_NUM_THREADS=16
+#   - mpirun -np 2 --map-by socket:PE=16 ./benchmark
+#
+# Configuration B: 4 MPI × 8 OpenMP
+#   - Good for: Balanced compute/communication
+#   - export OMP_NUM_THREADS=8
+#   - mpirun -np 4 --map-by socket:PE=8 ./benchmark
+#
+# Configuration C: 8 MPI × 4 OpenMP
+#   - Good for: Communication-intensive applications
+#   - export OMP_NUM_THREADS=4
+#   - mpirun -np 8 --map-by socket:PE=4 ./benchmark
+# ============================================================

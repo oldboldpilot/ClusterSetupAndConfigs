@@ -1,0 +1,122 @@
+{#
+UPC++ Configuration Template for Benchmarks
+Generates UPC++-specific runtime configuration for benchmark execution
+
+Variables:
+  - cluster_nodes: List of nodes with IP and CPU count
+  - shared_heap_size: Shared heap size (e.g., 512M, 1G, 2G)
+  - network_backend: Network backend (mpi, gasnet-udp, gasnet-ibv)
+  - use_thread_mode: Threading mode (seq, par)
+  - gasnet_conduit: GASNet conduit (udp, mpi, ibv, aries)
+#}
+# UPC++ Benchmark Configuration
+# Auto-generated from template: templates/benchmarks/upcxx/benchmark_config.j2
+# Generated: {{ generation_timestamp }}
+
+# ============================================================
+# UPC++ Runtime Configuration for Benchmarks
+# ============================================================
+
+# Shared Heap Configuration
+{% if shared_heap_size %}
+export UPCXX_SHARED_HEAP_SIZE={{ shared_heap_size }}
+{% else %}
+export UPCXX_SHARED_HEAP_SIZE=512M
+{% endif %}
+
+# Threading Mode
+{% if use_thread_mode %}
+export UPCXX_THREADMODE={{ use_thread_mode }}
+{% else %}
+export UPCXX_THREADMODE=seq
+{% endif %}
+
+# Network Backend Configuration
+{% if network_backend %}
+# Network Backend: {{ network_backend }}
+{% if network_backend == 'gasnet-udp' %}
+export GASNET_CONDUIT=udp
+export GASNET_UDP_SPAWNER=ssh
+{% elif network_backend == 'gasnet-ibv' %}
+export GASNET_CONDUIT=ibv
+export GASNET_IBV_SPAWNER=ssh
+{% elif network_backend == 'gasnet-mpi' %}
+export GASNET_CONDUIT=mpi
+{% elif network_backend == 'mpi' %}
+export UPCXX_NETWORK=mpi
+{% endif %}
+{% endif %}
+
+{% if gasnet_conduit %}
+# GASNet Conduit: {{ gasnet_conduit }}
+export GASNET_CONDUIT={{ gasnet_conduit }}
+{% if gasnet_conduit in ['udp', 'ibv', 'aries'] %}
+export GASNET_{{ gasnet_conduit|upper }}_SPAWNER=ssh
+{% endif %}
+{% endif %}
+
+# Performance Tuning
+export UPCXX_RPC_EAGER_LIMIT=4096
+export UPCXX_ALLOCATOR=system
+export GASNET_PHYSMEM_MAX=512M
+
+# Network Optimization
+export GASNET_EXITTIMEOUT=60
+export GASNET_NETWORKDEPTH=24
+export GASNET_FIREHOSE_MAXREGIONS=1024
+
+# Debug Settings (disable for production benchmarks)
+export UPCXX_VERBOSE=0
+export GASNET_VERBOSEENV=0
+
+# ============================================================
+# Cluster Node Information
+# ============================================================
+{% for node in cluster_nodes %}
+# {{ node.hostname }}: {{ node.ip }} ({{ node.cpus }} CPUs)
+{% endfor %}
+
+# ============================================================
+# Benchmark Execution Commands
+# ============================================================
+
+# Example: Run with {{ cluster_nodes|length }} ranks (1 per node)
+# upcxx-run -n {{ cluster_nodes|length }} ./upcxx_latency
+
+# Example: Run with all available CPUs
+# upcxx-run -n {{ cluster_nodes|sum(attribute='cpus') }} ./upcxx_benchmark
+
+# Example: Run latency benchmark (2 ranks)
+# upcxx-run -n 2 ./upcxx_latency
+
+# Example: Run with explicit hostfile
+# upcxx-run -n 4 -hostfile hostfile ./upcxx_benchmark
+
+# Example: Run with GASNet UDP conduit
+# export GASNET_CONDUIT=udp
+# export GASNET_UDP_SPAWNER=ssh
+# upcxx-run -n 4 ./upcxx_benchmark
+
+# ============================================================
+# UPC++ Terminology:
+#   - Rank: Process identifier (0 to ranks()-1)
+#   - Global Pointer: Pointer to shared memory
+#   - RPC: Remote Procedure Call
+#   - Future: Asynchronous operation handle
+#   - Promise: Future producer
+# ============================================================
+
+# ============================================================
+# GASNet Conduits:
+#   - udp:    UDP-based networking (portable, slower)
+#   - mpi:    MPI-based networking (portable)
+#   - ibv:    InfiniBand Verbs (high performance)
+#   - aries:  Cray Aries network
+#   - ofi:    OpenFabrics Interface (libfabric)
+# ============================================================
+
+# ============================================================
+# Threading Modes:
+#   - seq: Sequential mode (no thread safety)
+#   - par: Parallel mode (thread-safe, may have overhead)
+# ============================================================

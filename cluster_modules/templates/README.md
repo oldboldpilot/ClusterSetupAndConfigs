@@ -1,12 +1,14 @@
 # Benchmark Templates
 
-## Overview
-This directory contains Jinja2 templates for generating HPC benchmark source code and build systems. These templates are used by `benchmark_manager.py` to create customizable benchmarks across multiple parallel programming frameworks.
+## Purpose
+This directory contains **benchmark-related templates** used by `benchmark_manager.py` to generate HPC benchmarks. This includes source code templates, runtime configuration templates, and build system templates for multiple parallel programming frameworks.
+
+**For cluster infrastructure configuration templates** (SSH, MPI hostfile, Slurm), see `templates/` in the project root.
 
 ## Directory Structure
 
 ```
-templates/
+cluster_modules/templates/
 ├── benchmarks/              # Benchmark source code templates
 │   ├── upcxx/               # UPC++ PGAS framework
 │   │   ├── upcxx_latency.cpp.j2
@@ -21,9 +23,22 @@ templates/
 │   │   └── openmp_parallel.cpp.j2
 │   └── hybrid/              # Hybrid MPI+OpenMP
 │       └── hybrid_mpi_openmp.cpp.j2
-└── build/                   # Build system templates
-    ├── Makefile.j2          # Makefile for compiling benchmarks
-    └── run_benchmarks.sh.j2 # Script for running all benchmarks
+├── configs/                 # Runtime configuration templates
+│   └── benchmarks/          # Benchmark runtime environment configs
+│       ├── mpi/
+│       │   └── benchmark_config.j2
+│       ├── openmp/
+│       │   └── benchmark_config.j2
+│       ├── openshmem/
+│       │   └── benchmark_config.j2
+│       ├── upcxx/
+│       │   └── benchmark_config.j2
+│       └── hybrid/
+│           └── benchmark_config.j2
+├── build/                   # Build system templates
+│   ├── Makefile.j2          # Makefile for compiling benchmarks
+│   └── run_benchmarks.sh.j2 # Script for running all benchmarks
+└── README.md                # This file
 ```
 
 ## Framework Categories
@@ -89,6 +104,69 @@ templates/
 - `hybrid_mpi_openmp.cpp.j2` - Combined MPI and OpenMP parallelism
 
 **Compiler:** `mpicxx` with `-fopenmp`
+
+## Runtime Configuration Templates (`configs/benchmarks/`)
+
+### Purpose
+Runtime environment configuration templates for benchmark execution. These generate scripts that set environment variables, configure threading, and tune framework-specific parameters before running benchmarks.
+
+### MPI (`configs/benchmarks/mpi/benchmark_config.j2`)
+**Variables Set:**
+- `OMPI_MCA_*` - OpenMPI MCA parameters
+- `MPICH_*` - MPICH-specific settings
+- Network interface binding
+- Process affinity
+- Communication protocol selection
+
+**Template Variables:**
+- `num_procs` - Number of MPI processes
+- `ppn` - Processes per node
+- `network_interface` - Network device for MPI communication
+
+### OpenMP (`configs/benchmarks/openmp/benchmark_config.j2`)
+**Variables Set:**
+- `OMP_NUM_THREADS` - Number of OpenMP threads
+- `OMP_PROC_BIND` - Thread affinity policy
+- `OMP_PLACES` - Thread placement
+- `OMP_SCHEDULE` - Loop scheduling policy
+
+**Template Variables:**
+- `num_threads` - Number of threads
+- `thread_affinity` - Binding policy (close, spread, master)
+
+### OpenSHMEM (`configs/benchmarks/openshmem/benchmark_config.j2`)
+**Variables Set:**
+- `SHMEM_SYMMETRIC_SIZE` - Symmetric heap size
+- `SMA_SYMMETRIC_SIZE` - Alternative heap size variable
+- `SHMEM_DEBUG` - Debug level
+- Process placement
+
+**Template Variables:**
+- `num_pes` - Number of processing elements
+- `heap_size` - Symmetric heap size (e.g., "512M")
+
+### UPC++ (`configs/benchmarks/upcxx/benchmark_config.j2`)
+**Variables Set:**
+- `GASNET_*` - GASNet communication layer settings
+- `UPCXX_SEGMENT_MB` - Shared segment size
+- Network conduit configuration
+- Communication buffer sizes
+
+**Template Variables:**
+- `num_ranks` - Number of UPC++ ranks
+- `segment_size` - Shared memory segment size
+- `conduit` - GASNet conduit (udp, ibv, mpi, etc.)
+
+### Hybrid (`configs/benchmarks/hybrid/benchmark_config.j2`)
+**Variables Set:**
+- Combined MPI and OpenMP settings
+- Process-thread affinity coordination
+- Resource allocation per MPI rank
+
+**Template Variables:**
+- `num_procs` - Number of MPI processes
+- `threads_per_proc` - OpenMP threads per MPI process
+- `total_threads` - Total parallelism (procs × threads)
 
 ## Build System Templates (`build/`)
 

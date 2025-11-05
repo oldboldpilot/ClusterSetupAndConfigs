@@ -249,9 +249,16 @@ bench_mgr.compile_benchmarks()
 bench_mgr.distribute_benchmarks_pdsh()
 ```
 
-**Note:** For standalone benchmark execution, use:
+**Note:** For comprehensive benchmark management, use:
 ```bash
-python -m cluster_tools.benchmarks.run_benchmarks --help
+# Create benchmark suite from templates
+python cluster_modules/benchmark_runner.py create
+
+# Compile benchmarks
+python cluster_modules/benchmark_runner.py compile
+
+# Run benchmarks
+python cluster_modules/benchmark_runner.py run <benchmark_name> --np 4
 ```
 
 #### `slurm_manager.py` - Slurm Workload Manager

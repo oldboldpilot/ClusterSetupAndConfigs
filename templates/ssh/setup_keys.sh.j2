@@ -1,0 +1,172 @@
+{#
+SSH Key Setup Script Template
+Generates a script to set up SSH keys across the cluster
+
+Variables:
+  - master_ip: Master node IP
+  - worker_ips: List of worker node IPs
+  - username: Username for cluster nodes
+  - ssh_key_path: Path to SSH key (~/.ssh/id_rsa by default)
+  - key_type: Type of SSH key (rsa, ed25519, ecdsa)
+  - key_bits: Key size for RSA (2048, 4096)
+#}
+#!/bin/bash
+#
+# SSH Key Setup Script for HPC Cluster
+# Auto-generated from template: templates/ssh/setup_keys.sh.j2
+# Generated: {{ generation_timestamp }}
+#
+# This script sets up passwordless SSH authentication across the cluster
+
+set -e
+
+# Configuration
+MASTER_IP="{{ master_ip }}"
+WORKER_IPS=({{ worker_ips | join(' ') }})
+USERNAME="{{ username }}"
+SSH_KEY_PATH="{{ ssh_key_path | default('~/.ssh/id_rsa') }}"
+KEY_TYPE="{{ key_type | default('ed25519') }}"
+{% if key_type == 'rsa' %}
+KEY_BITS="{{ key_bits | default(4096) }}"
+{% endif %}
+
+echo "======================================================================"
+echo "SSH Key Setup for HPC Cluster"
+echo "======================================================================"
+echo "Master: $MASTER_IP"
+echo "Workers: ${WORKER_IPS[@]}"
+echo "Username: $USERNAME"
+echo "Key Type: $KEY_TYPE"
+echo "======================================================================"
+echo
+
+# Function to check if SSH key exists
+check_ssh_key() {
+    local key_path="$1"
+    if [ -f "$key_path" ]; then
+        echo "✓ SSH key exists: $key_path"
+        return 0
+    else
+        echo "✗ SSH key not found: $key_path"
+        return 1
+    fi
+}
+
+# Function to generate SSH key
+generate_ssh_key() {
+    local key_path="$1"
+    local key_type="$2"
+    
+    echo "Generating new SSH key..."
+    
+    {% if key_type == 'rsa' %}
+    ssh-keygen -t "$key_type" -b $KEY_BITS -f "$key_path" -N "" -C "{{ username }}@cluster"
+    {% else %}
+    ssh-keygen -t "$key_type" -f "$key_path" -N "" -C "{{ username }}@cluster"
+    {% endif %}
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ SSH key generated successfully"
+        return 0
+    else
+        echo "✗ Failed to generate SSH key"
+        return 1
+    fi
+}
+
+# Function to copy SSH key to remote host
+copy_ssh_key() {
+    local remote_ip="$1"
+    local key_path="$2"
+    
+    echo "Copying SSH key to $remote_ip..."
+    
+    # Try ssh-copy-id first
+    if command -v ssh-copy-id &> /dev/null; then
+        ssh-copy-id -i "${key_path}.pub" "$USERNAME@$remote_ip" 2>/dev/null
+    else
+        # Fallback: manual copy
+        cat "${key_path}.pub" | ssh "$USERNAME@$remote_ip" \
+            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+    fi
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ SSH key copied to $remote_ip"
+        return 0
+    else
+        echo "✗ Failed to copy SSH key to $remote_ip"
+        return 1
+    fi
+}
+
+# Function to test SSH connection
+test_ssh_connection() {
+    local remote_ip="$1"
+    
+    echo "Testing SSH connection to $remote_ip..."
+    
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 "$USERNAME@$remote_ip" "echo 'SSH connection successful'" &>/dev/null; then
+        echo "✓ SSH connection to $remote_ip successful"
+        return 0
+    else
+        echo "✗ SSH connection to $remote_ip failed"
+        return 1
+    fi
+}
+
+# Main execution
+echo "[Step 1/4] Checking for existing SSH key..."
+if ! check_ssh_key "$SSH_KEY_PATH"; then
+    echo "Would you like to generate a new SSH key? (y/n)"
+    read -r response
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        generate_ssh_key "$SSH_KEY_PATH" "$KEY_TYPE" || exit 1
+    else
+        echo "Exiting. Please generate an SSH key manually."
+        exit 1
+    fi
+fi
+
+echo
+echo "[Step 2/4] Copying SSH key to worker nodes..."
+for worker_ip in "${WORKER_IPS[@]}"; do
+    copy_ssh_key "$worker_ip" "$SSH_KEY_PATH"
+done
+
+echo
+echo "[Step 3/4] Setting up bidirectional SSH (workers to master)..."
+# Allow workers to SSH back to master
+for worker_ip in "${WORKER_IPS[@]}"; do
+    echo "Configuring bidirectional access for $worker_ip..."
+    ssh "$USERNAME@$worker_ip" "
+        if [ ! -f ~/.ssh/id_$KEY_TYPE ]; then
+            ssh-keygen -t $KEY_TYPE -f ~/.ssh/id_$KEY_TYPE -N '' -C '$USERNAME@$worker_ip'
+        fi
+        cat ~/.ssh/id_$KEY_TYPE.pub
+    " | ssh "$USERNAME@$MASTER_IP" "
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        cat >> ~/.ssh/authorized_keys
+        chmod 600 ~/.ssh/authorized_keys
+    " && echo "✓ Bidirectional SSH configured for $worker_ip"
+done
+
+echo
+echo "[Step 4/4] Testing SSH connections..."
+all_success=true
+for worker_ip in "${WORKER_IPS[@]}"; do
+    if ! test_ssh_connection "$worker_ip"; then
+        all_success=false
+    fi
+done
+
+echo
+echo "======================================================================"
+if [ "$all_success" = true ]; then
+    echo "✓ SSH key setup completed successfully!"
+    echo "You can now SSH to all nodes without a password."
+else
+    echo "⚠ SSH key setup completed with some errors."
+    echo "Please check the failed connections manually."
+fi
+echo "======================================================================"

@@ -1,52 +1,35 @@
-# Template Organization Guide
+# Cluster Configuration Templates
+
+## Purpose
+This directory contains **cluster infrastructure configuration templates** used by `config_template_manager.py` to set up the HPC cluster environment. These are system-level configuration files for runtime environments, SSH, and workload managers.
+
+**For benchmark-related templates** (source code, runtime configs, build systems), see `cluster_modules/templates/`.
 
 ## Directory Structure
 
 ```
-ClusterSetupAndConfigs/
-├── templates/                    # Main configuration templates (used by config_template_manager)
-│   ├── mpi/                      # MPI runtime configuration
-│   │   ├── hostfile.j2           # MPI hostfile template
-│   │   └── mca-params.conf.j2    # OpenMPI MCA parameters
-│   ├── ssh/                      # SSH configuration
-│   │   └── config.j2             # SSH client configuration
-│   ├── slurm/                    # Slurm workload manager
-│   │   └── slurm.conf.j2         # Slurm configuration
-│   └── benchmarks/               # Placeholder for future config templates
-│
-└── cluster_modules/
-    └── templates/                # Benchmark code templates (used by benchmark_manager)
-        ├── benchmarks/           # Benchmark source code templates
-        │   ├── upcxx/            # UPC++ benchmarks
-        │   │   ├── upcxx_latency.cpp.j2
-        │   │   └── upcxx_bandwidth.cpp.j2
-        │   ├── mpi/              # MPI benchmarks
-        │   │   └── mpi_latency.cpp.j2
-        │   ├── openshmem/        # OpenSHMEM benchmarks
-        │   │   └── openshmem_latency.cpp.j2
-        │   ├── berkeley_upc/     # Berkeley UPC benchmarks
-        │   │   └── berkeley_upc_latency.c.j2
-        │   ├── openmp/           # OpenMP benchmarks
-        │   │   └── openmp_parallel.cpp.j2
-        │   └── hybrid/           # Hybrid MPI+OpenMP benchmarks
-        │       └── hybrid_mpi_openmp.cpp.j2
-        └── build/                # Build system templates
-            ├── Makefile.j2       # Makefile for building benchmarks
-            └── run_benchmarks.sh.j2  # Script to run all benchmarks
+templates/
+├── mpi/                      # MPI runtime configuration
+│   ├── hostfile.j2           # MPI hostfile template
+│   └── mca-params.conf.j2    # OpenMPI MCA parameters
+├── ssh/                      # SSH configuration
+│   ├── config.j2             # SSH client configuration
+│   └── setup_keys.sh.j2      # SSH key setup automation
+├── slurm/                    # Slurm workload manager
+│   └── slurm.conf.j2         # Slurm configuration
+└── README.md                 # This file
 ```
 
 ## Template Categories
 
-### 1. Configuration Templates (`templates/`)
-**Purpose:** System-level configuration files for cluster infrastructure  
-**Used by:** `config_template_manager.py`  
-**Location:** Project root `templates/` directory
+### 1. MPI Configuration (`mpi/`)
+**Purpose:** MPI runtime environment configuration  
+**Used by:** `config_template_manager.py`
 
-**Categories:**
-- **mpi/** - MPI runtime configuration
-  - Network interface selection
+**Templates:**
+- **hostfile.j2** - MPI hostfile generation
+  - Node listing with CPU slots
   - Process placement
-  - Communication protocols
   
 - **ssh/** - SSH client configuration
   - Host aliases

@@ -1,0 +1,101 @@
+{#
+OpenMP Configuration Template for Benchmarks
+Generates OpenMP-specific runtime configuration for benchmark execution
+
+Variables:
+  - num_threads: Number of OpenMP threads
+  - thread_affinity: Thread affinity policy (close, spread, master)
+  - schedule_type: OpenMP schedule type (static, dynamic, guided)
+  - chunk_size: Chunk size for dynamic/guided scheduling
+  - enable_nested: Enable nested parallelism
+  - max_active_levels: Maximum nested parallel levels
+#}
+# OpenMP Benchmark Configuration
+# Auto-generated from template: templates/benchmarks/openmp/benchmark_config.j2
+# Generated: {{ generation_timestamp }}
+
+# ============================================================
+# OpenMP Runtime Configuration for Benchmarks
+# ============================================================
+
+# Thread Configuration
+{% if num_threads %}
+export OMP_NUM_THREADS={{ num_threads }}
+{% else %}
+export OMP_NUM_THREADS=$(nproc)
+{% endif %}
+
+# Thread Affinity
+{% if thread_affinity %}
+export OMP_PROC_BIND={{ thread_affinity }}
+{% else %}
+export OMP_PROC_BIND=close
+{% endif %}
+
+# Thread Placement
+export OMP_PLACES=cores
+
+# Scheduling
+{% if schedule_type %}
+{% if chunk_size %}
+export OMP_SCHEDULE={{ schedule_type }},{{ chunk_size }}
+{% else %}
+export OMP_SCHEDULE={{ schedule_type }}
+{% endif %}
+{% else %}
+export OMP_SCHEDULE=static
+{% endif %}
+
+# Nested Parallelism
+{% if enable_nested %}
+export OMP_NESTED=true
+export OMP_MAX_ACTIVE_LEVELS={{ max_active_levels | default(2) }}
+{% else %}
+export OMP_NESTED=false
+export OMP_MAX_ACTIVE_LEVELS=1
+{% endif %}
+
+# Performance Tuning
+export OMP_WAIT_POLICY=active  # Active waiting for better latency
+export OMP_DYNAMIC=false       # Disable dynamic thread adjustment for benchmarks
+
+# Stack Size (increase if needed for large arrays)
+export OMP_STACKSIZE=64M
+
+# Display Thread Information (useful for debugging)
+export OMP_DISPLAY_ENV=false
+export OMP_DISPLAY_AFFINITY=false
+
+# ============================================================
+# Thread Affinity Policies:
+#   - close:  Threads placed close together
+#   - spread: Threads spread across cores
+#   - master: Threads placed near master thread
+#
+# Schedule Types:
+#   - static:  Fixed chunk assignment (best for uniform work)
+#   - dynamic: Runtime chunk assignment (good for variable work)
+#   - guided:  Decreasing chunk sizes (adaptive)
+#   - auto:    Compiler/runtime decides
+# ============================================================
+
+# ============================================================
+# Benchmark Execution Commands
+# ============================================================
+
+# Example: Run with specific thread count
+# export OMP_NUM_THREADS=16 && ./openmp_benchmark
+
+# Example: Test thread scaling
+# for t in 1 2 4 8 16 32; do
+#     export OMP_NUM_THREADS=$t
+#     ./openmp_benchmark
+# done
+
+# Example: Compare affinity policies
+# for policy in close spread master; do
+#     export OMP_PROC_BIND=$policy
+#     ./openmp_benchmark
+# done
+
+# ============================================================

@@ -314,6 +314,91 @@ class ClusterBenchmarkRunner:
                 print(f"  ✗ {r.name}: {r.error}")
         
         print("="*70)
+    
+    def create_benchmark_suite(self) -> bool:
+        """
+        Create complete benchmark suite using benchmark_manager.
+        
+        Returns:
+            bool: True if suite created successfully
+        """
+        print("\n=== Creating Benchmark Suite ===")
+        
+        from cluster_modules.benchmark_manager import BenchmarkManager
+        
+        # Create manager instance
+        try:
+            with open(self.config_file) as f:
+                config = yaml.safe_load(f)
+            
+            master_data = config['master']
+            if isinstance(master_data, list):
+                master_data = master_data[0]
+            
+            workers = [w['ip'] for w in config.get('workers', [])]
+            
+            manager = BenchmarkManager(
+                username=config.get('username', 'muyiwa'),
+                password="",  # SSH keys used
+                master_ip=master_data['ip'],
+                worker_ips=workers,
+                benchmark_dir=self.benchmark_dir
+            )
+            
+            # Create all benchmarks
+            success = manager.create_all_benchmarks()
+            
+            if success:
+                print(f"\n✓ Benchmark suite created at: {self.benchmark_dir}")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Failed to create benchmark suite: {e}")
+            return False
+    
+    def compile_benchmarks(self) -> bool:
+        """
+        Compile all benchmarks using Makefile.
+        
+        Returns:
+            bool: True if compilation successful
+        """
+        print("\n=== Compiling Benchmarks ===")
+        
+        makefile = self.benchmark_dir / "Makefile"
+        if not makefile.exists():
+            print(f"✗ Makefile not found: {makefile}")
+            print("  Run with 'create' command first")
+            return False
+        
+        make_cmd = ["make", "-C", str(self.benchmark_dir), "-j$(nproc)"]
+        
+        try:
+            result = subprocess.run(
+                make_cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                shell=True
+            )
+            
+            if result.returncode == 0:
+                print("✓ All benchmarks compiled successfully")
+                if result.stdout:
+                    print(result.stdout)
+                return True
+            else:
+                print(f"✗ Compilation failed:")
+                print(result.stderr)
+                return False
+                
+        except subprocess.TimeoutExpired:
+            print("✗ Compilation timed out")
+            return False
+        except Exception as e:
+            print(f"✗ Error compiling benchmarks: {e}")
+            return False
 
 
 def main():
@@ -324,6 +409,12 @@ def main():
     parser.add_argument('--config', default='cluster_config_actual.yaml')
     
     subparsers = parser.add_subparsers(dest='command')
+    
+    # Create
+    subparsers.add_parser('create', help='Create benchmark suite from templates')
+    
+    # Compile
+    subparsers.add_parser('compile', help='Compile all benchmarks')
     
     # Sync
     subparsers.add_parser('sync', help='Sync binaries to all nodes')
@@ -345,7 +436,15 @@ def main():
     
     runner = ClusterBenchmarkRunner(config_file=Path(args.config))
     
-    if args.command == 'sync':
+    if args.command == 'create':
+        success = runner.create_benchmark_suite()
+        exit(0 if success else 1)
+    
+    elif args.command == 'compile':
+        success = runner.compile_benchmarks()
+        exit(0 if success else 1)
+    
+    elif args.command == 'sync':
         results = runner.sync_benchmarks()
         success = sum(1 for v in results.values() if v)
         print(f"\n✓ Synced to {success}/{len(results)} nodes")

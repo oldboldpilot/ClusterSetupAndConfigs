@@ -1,0 +1,98 @@
+{#
+OpenSHMEM Configuration Template for Benchmarks
+Generates OpenSHMEM-specific runtime configuration for benchmark execution
+
+Variables:
+  - cluster_nodes: List of nodes with IP and CPU count
+  - symmetric_heap_size: Symmetric heap size (e.g., 512M, 1G, 2G)
+  - use_cma: Use Cross-Memory Attach for shared memory
+  - network_interface: Network interface for OpenSHMEM communication
+  - transport_layer: Transport layer (ucx, ofi, portals4)
+#}
+# OpenSHMEM Benchmark Configuration
+# Auto-generated from template: templates/benchmarks/openshmem/benchmark_config.j2
+# Generated: {{ generation_timestamp }}
+
+# ============================================================
+# OpenSHMEM Runtime Configuration for Benchmarks
+# ============================================================
+
+# Symmetric Heap Configuration
+{% if symmetric_heap_size %}
+export SMA_SYMMETRIC_SIZE={{ symmetric_heap_size }}
+{% else %}
+export SMA_SYMMETRIC_SIZE=512M
+{% endif %}
+
+# Network Configuration
+{% if network_interface %}
+export SMA_OFI_PROVIDER_ADDR={{ network_interface }}
+{% endif %}
+
+{% if transport_layer %}
+# Transport Layer: {{ transport_layer }}
+{% if transport_layer == 'ucx' %}
+export SHMEM_TRANSPORT=ucx
+export UCX_NET_DEVICES={{ network_interface | default('mlx5_0:1') }}
+export UCX_TLS=rc,sm,self
+{% elif transport_layer == 'ofi' %}
+export SHMEM_TRANSPORT=ofi
+export FI_PROVIDER=tcp
+{% elif transport_layer == 'portals4' %}
+export SHMEM_TRANSPORT=portals4
+{% endif %}
+{% endif %}
+
+# Shared Memory Optimization
+{% if use_cma %}
+export SMA_XPMEM_ENABLE=1
+export SMA_CMA_ENABLE=1
+{% endif %}
+
+# Performance Tuning
+export SHMEM_BOUNCE_SIZE=4096
+export SHMEM_COLL_CROSSOVER=4
+export SHMEM_SYMMETRIC_HEAP_USE_HUGE_PAGES=1
+
+# Debug Settings (disable for production benchmarks)
+export SHMEM_DEBUG=0
+export SHMEM_INFO=0
+
+# ============================================================
+# Cluster Node Information
+# ============================================================
+{% for node in cluster_nodes %}
+# {{ node.hostname }}: {{ node.ip }} ({{ node.cpus }} CPUs)
+{% endfor %}
+
+# ============================================================
+# Benchmark Execution Commands
+# ============================================================
+
+# Example: Run with {{ cluster_nodes|length }} PEs (1 per node)
+# oshrun -np {{ cluster_nodes|length }} ./openshmem_latency
+
+# Example: Run with all available CPUs
+# oshrun -np {{ cluster_nodes|sum(attribute='cpus') }} ./openshmem_benchmark
+
+# Example: Run latency benchmark (2 PEs)
+# oshrun -np 2 ./openshmem_latency
+
+# Example: Run with explicit hostfile
+# oshrun -np 4 -hostfile hostfile ./openshmem_benchmark
+
+# ============================================================
+# OpenSHMEM Terminology:
+#   - PE: Processing Element (similar to MPI rank)
+#   - Symmetric Memory: Memory accessible by all PEs
+#   - PUT: One-sided write operation
+#   - GET: One-sided read operation
+#   - AMO: Atomic Memory Operation
+# ============================================================
+
+# ============================================================
+# Transport Layer Options:
+#   - ucx:      Unified Communication X (RDMA-capable)
+#   - ofi:      OpenFabrics Interface (libfabric)
+#   - portals4: Portals 4 network programming interface
+# ============================================================
