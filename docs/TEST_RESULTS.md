@@ -405,8 +405,8 @@ All changes pushed to GitHub: `https://github.com/oldboldpilot/ClusterSetupAndCo
 ## Next Steps
 
 1. ✅ Document test results (this file)
-2. ⏭️ Fix UPC++ templates for 2025.10.0 API
-3. ⏭️ Fix OpenSHMEM linker flags
+2. ✅ Fix UPC++ templates for 2025.10.0 API (Commit: 73cac25)
+3. ✅ Fix OpenSHMEM linker flags (Commit: 73cac25)
 4. ⏭️ Configure WSL firewall
 5. ⏭️ Retest MPI communication with all 4 nodes
 6. ⏭️ Retest benchmark compilation
