@@ -324,6 +324,195 @@ class ConfigTemplateManager:
         
         return results
     
+    def configure_firewall_node(
+        self,
+        node_ip: str,
+        ports: str = "50000-50200",
+        protocol: str = "tcp"
+    ) -> tuple[bool, str]:
+        """
+        Configure firewall on a single node for MPI communication
+        
+        Args:
+            node_ip: IP address of the node
+            ports: Port range to open (e.g., "50000-50200")
+            protocol: Protocol (tcp/udp)
+        
+        Returns:
+            Tuple of (success, message)
+        """
+        # Get node info to determine OS
+        node = None
+        if node_ip == self.cluster_config.master.ip:
+            node = self.cluster_config.master
+        else:
+            for worker in self.cluster_config.workers:
+                if worker.ip == node_ip:
+                    node = worker
+                    break
+        
+        if not node:
+            return False, f"Node {node_ip} not found in cluster config"
+        
+        os_type = node.os.lower()
+        
+        try:
+            # Detect firewall type on the node
+            # Try firewalld first
+            detect_cmd = f"ssh {node_ip} 'which firewall-cmd >/dev/null 2>&1 && echo firewalld || true'"
+            result = subprocess.run(
+                detect_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            firewall_type = result.stdout.strip()
+            
+            # If not firewalld, try ufw
+            if not firewall_type:
+                detect_cmd = f"ssh {node_ip} 'which ufw >/dev/null 2>&1 && echo ufw || true'"
+                result = subprocess.run(
+                    detect_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                firewall_type = result.stdout.strip()
+            
+            # If neither, it's none
+            if not firewall_type:
+                firewall_type = "none"
+            
+            if firewall_type == "firewalld":
+                # RedHat/Rocky/CentOS with firewalld
+                cmd = f"ssh {node_ip} 'sudo firewall-cmd --permanent --add-port={ports}/{protocol} && sudo firewall-cmd --reload'"
+                subprocess.run(cmd, shell=True, check=True, timeout=15, capture_output=True)
+                return True, f"✓ firewalld configured on {node.hostname}"
+                
+            elif firewall_type == "ufw":
+                # Ubuntu with ufw
+                cmd = f"ssh {node_ip} 'sudo ufw allow {ports}/{protocol} && sudo ufw status | grep -q inactive || sudo ufw reload'"
+                subprocess.run(cmd, shell=True, check=True, timeout=15, capture_output=True)
+                return True, f"✓ ufw configured on {node.hostname}"
+                
+            elif firewall_type == "none":
+                # No firewall detected
+                return True, f"⚠ No firewall detected on {node.hostname} - ports may already be open"
+                
+            else:
+                return False, f"✗ Unknown firewall type on {node.hostname}: {firewall_type}"
+                
+        except subprocess.TimeoutExpired:
+            return False, f"✗ Timeout configuring firewall on {node.hostname}"
+        except subprocess.CalledProcessError as e:
+            return False, f"✗ Error configuring firewall on {node.hostname}: {e}"
+    
+    def configure_all_firewalls(
+        self,
+        ports: str = "50000-50200",
+        protocol: str = "tcp",
+        nodes: List[str] = None
+    ) -> Dict[str, tuple[bool, str]]:
+        """
+        Configure firewalls on all cluster nodes for MPI communication
+        
+        Args:
+            ports: Port range to open (default: "50000-50200" for MPI)
+            protocol: Protocol (tcp/udp, default: tcp)
+            nodes: List of node IPs (None = all nodes)
+        
+        Returns:
+            Dict mapping node IP to (success, message) tuple
+        """
+        if nodes is None:
+            nodes = self.cluster_config.all_ips
+        
+        logger.info(f"Configuring firewalls for ports {ports}/{protocol} on {len(nodes)} nodes...")
+        
+        results = {}
+        for node_ip in nodes:
+            success, message = self.configure_firewall_node(node_ip, ports, protocol)
+            results[node_ip] = (success, message)
+            if success:
+                logger.info(message)
+            else:
+                logger.error(message)
+        
+        # Summary
+        success_count = sum(1 for success, _ in results.values() if success)
+        print(f"\nFirewall configuration: {success_count}/{len(nodes)} nodes successful")
+        
+        return results
+    
+    def verify_firewall_config(self, nodes: List[str] = None) -> Dict[str, str]:
+        """
+        Verify firewall configuration on cluster nodes
+        
+        Args:
+            nodes: List of node IPs to check (None = all nodes)
+        
+        Returns:
+            Dict mapping node IP to firewall status
+        """
+        if nodes is None:
+            nodes = self.cluster_config.all_ips
+        
+        logger.info(f"Verifying firewall configuration on {len(nodes)} nodes...")
+        
+        results = {}
+        for node_ip in nodes:
+            try:
+                # Try to detect firewall type
+                # Try firewalld first
+                detect_cmd = f"ssh {node_ip} 'which firewall-cmd >/dev/null 2>&1 && echo firewalld || true'"
+                detect_result = subprocess.run(
+                    detect_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                firewall_type = detect_result.stdout.strip()
+                
+                # If not firewalld, try ufw
+                if not firewall_type:
+                    detect_cmd = f"ssh {node_ip} 'which ufw >/dev/null 2>&1 && echo ufw || true'"
+                    detect_result = subprocess.run(
+                        detect_cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    firewall_type = detect_result.stdout.strip()
+                
+                if not firewall_type:
+                    firewall_type = "none"
+                
+                if firewall_type == "firewalld":
+                    # Check firewalld rules
+                    cmd = f"ssh {node_ip} 'sudo firewall-cmd --list-ports'"
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    results[node_ip] = f"firewalld: {result.stdout.strip()}"
+                    
+                elif firewall_type == "ufw":
+                    # Check ufw status
+                    cmd = f"ssh {node_ip} 'sudo ufw status | grep 50000:50200'"
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    results[node_ip] = f"ufw: {result.stdout.strip() if result.returncode == 0 else 'ports not found'}"
+                    
+                else:
+                    results[node_ip] = "No firewall detected"
+                    
+            except subprocess.TimeoutExpired:
+                results[node_ip] = "Timeout"
+            except Exception as e:
+                results[node_ip] = f"Error: {e}"
+        
+        return results
+    
     def print_summary(self):
         """Print cluster configuration summary"""
         print("\n" + "=" * 70)
@@ -368,6 +557,16 @@ def main():
     deploy_parser.add_argument('type', choices=['mpi-mca', 'ssh', 'slurm'])
     deploy_parser.add_argument('--nodes', nargs='+', help='Specific nodes to deploy to')
     deploy_parser.add_argument('--no-backup', action='store_true', help='Skip backup')
+    
+    # Firewall command
+    firewall_parser = subparsers.add_parser('firewall', help='Configure firewall on cluster nodes')
+    firewall_parser.add_argument('action', choices=['configure', 'verify'], 
+                                  help='Action: configure or verify firewall')
+    firewall_parser.add_argument('--ports', default='50000-50200', 
+                                  help='Port range to open (default: 50000-50200)')
+    firewall_parser.add_argument('--protocol', default='tcp', choices=['tcp', 'udp'],
+                                  help='Protocol (default: tcp)')
+    firewall_parser.add_argument('--nodes', nargs='+', help='Specific nodes (default: all)')
     
     # Summary command
     subparsers.add_parser('summary', help='Print cluster configuration summary')
@@ -430,6 +629,44 @@ def main():
                 print("✓ All nodes configured successfully!")
             else:
                 print("✗ Some nodes failed. Check logs above.")
+    
+    elif args.command == 'firewall':
+        if args.action == 'configure':
+            results = manager.configure_all_firewalls(
+                ports=args.ports,
+                protocol=args.protocol,
+                nodes=args.nodes
+            )
+            
+            # Print detailed results
+            print("\n" + "=" * 70)
+            print("Firewall Configuration Results")
+            print("=" * 70)
+            for node_ip, (success, message) in results.items():
+                print(f"{node_ip}: {message}")
+            print("=" * 70)
+            
+        elif args.action == 'verify':
+            results = manager.verify_firewall_config(nodes=args.nodes)
+            
+            print("\n" + "=" * 70)
+            print("Firewall Status")
+            print("=" * 70)
+            for node_ip, status in results.items():
+                # Find node hostname
+                node = None
+                if node_ip == manager.cluster_config.master.ip:
+                    node = manager.cluster_config.master
+                else:
+                    for w in manager.cluster_config.workers:
+                        if w.ip == node_ip:
+                            node = w
+                            break
+                
+                hostname = node.hostname if node else "unknown"
+                print(f"{hostname} ({node_ip}):")
+                print(f"  {status}")
+            print("=" * 70)
 
 
 if __name__ == '__main__':
