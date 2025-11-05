@@ -96,7 +96,7 @@ class BenchmarkManager:
         print("\n=== Creating UPC++ Latency Benchmark ===")
         
         try:
-            template = self.jinja_env.get_template("upcxx_latency.cpp.j2")
+            template = self.jinja_env.get_template("benchmarks/upcxx/upcxx_latency.cpp.j2")
             code = template.render(
                 iterations=iterations,
                 warmup_iterations=warmup_iterations
@@ -130,7 +130,7 @@ class BenchmarkManager:
         print("\n=== Creating MPI Latency Benchmark ===")
         
         try:
-            template = self.jinja_env.get_template("mpi_latency.cpp.j2")
+            template = self.jinja_env.get_template("benchmarks/mpi/mpi_latency.cpp.j2")
             code = template.render(
                 iterations=iterations,
                 warmup_iterations=warmup_iterations,
@@ -166,7 +166,7 @@ class BenchmarkManager:
             message_sizes = [1024, 4096, 16384, 65536, 262144, 1048576]
         
         try:
-            template = self.jinja_env.get_template("upcxx_bandwidth.cpp.j2")
+            template = self.jinja_env.get_template("benchmarks/upcxx/upcxx_bandwidth.cpp.j2")
             code = template.render(
                 iterations=iterations,
                 message_sizes=message_sizes
@@ -198,7 +198,7 @@ class BenchmarkManager:
         print("\n=== Creating OpenSHMEM Latency Benchmark ===")
         
         try:
-            template = self.jinja_env.get_template("openshmem_latency.cpp.j2")
+            template = self.jinja_env.get_template("benchmarks/openshmem/openshmem_latency.cpp.j2")
             code = template.render(
                 iterations=iterations,
                 warmup_iterations=warmup_iterations
@@ -230,7 +230,7 @@ class BenchmarkManager:
         print("\n=== Creating Berkeley UPC Latency Benchmark ===")
         
         try:
-            template = self.jinja_env.get_template("berkeley_upc_latency.c.j2")
+            template = self.jinja_env.get_template("benchmarks/berkeley_upc/berkeley_upc_latency.c.j2")
             code = template.render(
                 iterations=iterations,
                 warmup_iterations=warmup_iterations
@@ -264,7 +264,7 @@ class BenchmarkManager:
         print("\n=== Creating OpenMP Parallel Benchmark ===")
         
         try:
-            template = self.jinja_env.get_template("openmp_parallel.cpp.j2")
+            template = self.jinja_env.get_template("benchmarks/openmp/openmp_parallel.cpp.j2")
             code = template.render(
                 num_threads=num_threads,
                 work_size=work_size,
@@ -299,7 +299,7 @@ class BenchmarkManager:
         print("\n=== Creating Hybrid MPI+OpenMP Benchmark ===")
         
         try:
-            template = self.jinja_env.get_template("hybrid_mpi_openmp.cpp.j2")
+            template = self.jinja_env.get_template("benchmarks/hybrid/hybrid_mpi_openmp.cpp.j2")
             code = template.render(
                 num_threads=num_threads,
                 work_size=work_size,
@@ -356,7 +356,7 @@ class BenchmarkManager:
             default_config.update(config)
         
         try:
-            template = self.jinja_env.get_template("Makefile.j2")
+            template = self.jinja_env.get_template("build/Makefile.j2")
             makefile_content = template.render(**default_config)
             
             makefile_path = self.benchmark_dir / "Makefile"
@@ -391,7 +391,7 @@ class BenchmarkManager:
         ]
         
         try:
-            template = self.jinja_env.get_template("run_benchmarks.sh.j2")
+            template = self.jinja_env.get_template("build/run_benchmarks.sh.j2")
             script_content = template.render(
                 num_procs=num_procs,
                 benchmark_dir=str(self.benchmark_dir),
