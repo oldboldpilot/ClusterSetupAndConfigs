@@ -439,8 +439,10 @@ class ClusterSetup:
         print("\n=== Verifying Installations ===")
         
         checks = [
-            ("GCC", "/home/linuxbrew/.linuxbrew/bin/gcc --version"),
-            ("G++", "/home/linuxbrew/.linuxbrew/bin/g++ --version"),
+            ("GCC (Homebrew)", "/home/linuxbrew/.linuxbrew/bin/gcc --version"),
+            ("GCC (System)", "gcc --version"),
+            ("G++ (Homebrew)", "/home/linuxbrew/.linuxbrew/bin/g++ --version"),
+            ("G++ (System)", "g++ --version"),
             ("Gfortran", "/home/linuxbrew/.linuxbrew/bin/gfortran --version"),
             ("Binutils (as)", "/home/linuxbrew/.linuxbrew/opt/binutils/bin/as --version"),
             ("Binutils (ld)", "/home/linuxbrew/.linuxbrew/opt/binutils/bin/ld --version"),
@@ -455,7 +457,11 @@ class ClusterSetup:
                 version = result.stdout.split('\n')[0] if result.stdout else "OK"
                 print(f"✓ {name}: {version}")
             else:
-                print(f"✗ {name}: NOT FOUND")
+                # Don't fail for optional homebrew versions if system version exists
+                if "Homebrew" in name:
+                    print(f"  {name}: Not available (system version may be used)")
+                else:
+                    print(f"✗ {name}: NOT FOUND")
     
     def _setup_other_nodes(self, config_file: str):
         """Setup other cluster nodes"""

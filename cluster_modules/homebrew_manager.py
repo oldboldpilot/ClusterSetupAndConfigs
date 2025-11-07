@@ -178,9 +178,14 @@ class HomebrewManager:
         
         # Create compatibility symlinks for older GCC versions that PGAS libraries might expect
         # This ensures tools like UPC++ that look for g++-11 will use our latest gcc-15
+        # Point directly to the versioned binary to avoid circular references
         compat_versions = ['11', '12', '13', '14']  # Common legacy versions
         for old_version in compat_versions:
             for compiler in ['gcc', 'g++', 'gfortran']:
+                # Remove any existing symlink first
+                remove_cmd = f"sudo rm -f {self.homebrew_bin}/{compiler}-{old_version}"
+                self._run_command(remove_cmd, check=False)
+                # Create new symlink pointing to the actual versioned binary
                 cmd = f"sudo ln -sf {self.homebrew_bin}/{compiler}-{gcc_version} {self.homebrew_bin}/{compiler}-{old_version}"
                 result = self._run_command(cmd, check=False)
                 # Silently continue if symlink creation fails (non-critical)

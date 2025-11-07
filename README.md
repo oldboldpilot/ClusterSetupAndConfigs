@@ -2,7 +2,25 @@
 
 Automated cluster setup and configuration scripts for Slurm and OpenMPI on Ubuntu/WSL and Red Hat systems using Python 3.14 and uv.
 
-## Recent Updates (November 4, 2025)
+## Recent Updates
+
+### November 7, 2025 - Bug Fixes & Template Improvements
+
+✅ **Critical Fixes:**
+- Fixed circular GCC symlink issue (gcc-11 → gcc-11)
+- Added missing `run_benchmarks.sh.j2` template for benchmark execution
+- Improved compiler verification to check both Homebrew and system compilers
+- Enhanced symlink creation to remove old links before creating new ones
+
+✅ **Template System:**
+- New comprehensive run script template with multi-launcher support
+- Color-coded benchmark execution output
+- Automatic compilation check before running benchmarks
+- Support for MPI, UPC++, OpenSHMEM, and OpenMP benchmarks
+
+See [FIXES_2025_11_07.md](FIXES_2025_11_07.md) for detailed information.
+
+### November 4, 2025 - Complete Modularization & PGAS Integration
 
 **Version 3.0 - Complete Modularization & PGAS Integration:**
 

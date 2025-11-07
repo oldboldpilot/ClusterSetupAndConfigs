@@ -382,12 +382,51 @@ class BenchmarkManager:
         """
         print("\n=== Creating Run Script ===")
         
+        from datetime import datetime
+        
         benchmarks = [
-            {'name': 'upcxx_latency', 'launcher': 'upcxx-run'},
-            {'name': 'upcxx_bandwidth', 'launcher': 'upcxx-run'},
-            {'name': 'mpi_latency', 'launcher': 'mpirun'},
-            {'name': 'openshmem_latency', 'launcher': 'oshrun'},
-            {'name': 'berkeley_upc_latency', 'launcher': 'upcc-run'}
+            {
+                'name': 'upcxx_latency',
+                'display_name': 'UPC++ Latency',
+                'executable': 'upcxx_latency',
+                'launcher': 'upcxx-run',
+                'extra_args': ''
+            },
+            {
+                'name': 'upcxx_bandwidth',
+                'display_name': 'UPC++ Bandwidth',
+                'executable': 'upcxx_bandwidth',
+                'launcher': 'upcxx-run',
+                'extra_args': ''
+            },
+            {
+                'name': 'mpi_latency',
+                'display_name': 'MPI Latency',
+                'executable': 'mpi_latency',
+                'launcher': 'mpirun',
+                'extra_args': ''
+            },
+            {
+                'name': 'openshmem_latency',
+                'display_name': 'OpenSHMEM Latency',
+                'executable': 'openshmem_latency',
+                'launcher': 'oshrun',
+                'extra_args': ''
+            },
+            {
+                'name': 'openmp_parallel',
+                'display_name': 'OpenMP Parallel',
+                'executable': 'openmp_parallel',
+                'launcher': 'none',
+                'extra_args': ''
+            },
+            {
+                'name': 'hybrid_mpi_openmp',
+                'display_name': 'Hybrid MPI+OpenMP',
+                'executable': 'hybrid_mpi_openmp',
+                'launcher': 'mpirun',
+                'extra_args': ''
+            }
         ]
         
         try:
@@ -395,7 +434,8 @@ class BenchmarkManager:
             script_content = template.render(
                 num_procs=num_procs,
                 benchmark_dir=str(self.benchmark_dir),
-                benchmarks=benchmarks
+                benchmarks=benchmarks,
+                generation_date=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             )
             
             script_path = self.benchmark_dir / "run_benchmarks.sh"
