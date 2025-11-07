@@ -149,17 +149,25 @@ class HomebrewManager:
         """Create symlinks for GCC to point to latest version"""
         print("\n=== Creating GCC Symlinks ===")
         
-        # Find the installed gcc version
+        # Find the highest installed gcc version (use sort -V for version sorting, tail -1 for highest)
+        # Only consider actual binaries, not symlinks (using find -type f or checking Cellar path)
         result = self._run_command(
-            f"ls {self.homebrew_bin}/gcc-* 2>/dev/null | grep -E 'gcc-[0-9]+$' | head -1",
+            f"ls -l {self.homebrew_bin}/gcc-* 2>/dev/null | grep Cellar | grep -E 'gcc-[0-9]+$' | tail -1",
             check=False
         )
+        
+        if result.returncode != 0 or not result.stdout.strip():
+            # Fallback: try sorting by version number
+            result = self._run_command(
+                f"ls {self.homebrew_bin}/gcc-* 2>/dev/null | grep -E 'gcc-[0-9]+$' | sort -V | tail -1",
+                check=False
+            )
         
         if result.returncode != 0 or not result.stdout.strip():
             print("⚠️  Could not detect GCC version for symlink creation")
             return False
         
-        gcc_path = result.stdout.strip()
+        gcc_path = result.stdout.strip().split()[-1] if '->' in result.stdout else result.stdout.strip()
         gcc_version = gcc_path.split('-')[-1]
         print(f"Found GCC version: {gcc_version}")
         
